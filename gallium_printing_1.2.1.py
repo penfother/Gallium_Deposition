@@ -333,8 +333,12 @@ def approach(stage: Device, step_mm: float) -> None:
 
         match key:
             case "w":
+                if stage.check_limit(step_mm) == False:
+                    return True
                 stage.move_rel(step_mm, wait=True)
             case "s":
+                if stage.check_limit(step_mm) == False:
+                    return True
                 stage.move_rel(-step_mm, wait=True)
             case "x":
                 break
