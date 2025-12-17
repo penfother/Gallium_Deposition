@@ -90,8 +90,8 @@ class Device:
         self.connection = connection
 
         # Movement limits
-        self.min_pos = device.settings.get("limit.min", unit=Units.NATIVE)
-        self.max_pos = device.settings.get("limit.max", unit=Units.NATIVE)
+        self.min_pos = device.settings.get("limit.min", unit=Units.LENGTH_MILLIMETRES)
+        self.max_pos = device.settings.get("limit.max", unit=Units.LENGTH_MILLIMETRES)
 
         # Speed profiles
         self.speed_profiles = {}
@@ -138,11 +138,13 @@ class Device:
         return self.active_profile["vel"]
 
     # -------------------- MOTION -----------------------------
-    def check_limit(self, move: float) -> None:
+    def check_limit(self, move: float) -> bool:
+        '''Verifies if the movement is within possible axis movement.'''
         if move < self.min_pos or move > self.max_pos:
             print("Movement out of bounds.")
-        
-        return True
+            return False
+        else:
+            return True
 
 
     def move_to(self, position_native: int, wait: bool = True):
@@ -172,6 +174,8 @@ class Device:
 
     def move_rel(self, mm: float, wait=False):
         prof = self.active_profile
+        if self.check_limit(mm) != True:
+            return True
 
         self.axis.move_velocity(
             prof["vel"],
