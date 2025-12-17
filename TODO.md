@@ -6,5 +6,5 @@ List of TODOs:
 Normal:
 * Add initial position capabilities
 * Add plunger travel calculation for a specific amount  of gallium
-* Add volume clacluation for syringe
-* 
+* Add volume calculation for syringe
+* Add speed profiles for movement and deposition

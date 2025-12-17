@@ -300,21 +300,34 @@ def make_dots(stage_x: Device, stage_y: Device, stage_z: Device, syringe: Device
 #def liquid_amount(volume: float) -> None:
     #'Calculates the plunger travel dependant on the volume of liquid metal'
 
-
-
-
-def draw_line(stage_x: Device, stage_y: Device, stage_z: Device, syringe: Device, 
-              line_length: float) -> None:
+def make_line(stage_x: Device, stage_y: Device, stage_z: Device, syringe: Device,
+              start_pos: list, line_length: float, direction: str):
+    '''Deposits the fluid in a line from a dedicated position and height. Lifts needle when done.'''   
     
-    stage_x.set_speed(0.2)
-    # Drop z
-    stage_z.move_rel(1, wait=True) # Placeholder for the approach
-    # Start dispensing
-    syringe.set_speed(0.2)
-    syringe.syringe_dispense(0.2)
-    # Simultaneously start moving into x direction
-    return True
+    # Sets movement speeds
+    stage_z.set_speed(0.2)
+    stage_x.set_speed(1)
+    stage_y.set_speed(1)
 
+    # Moves to position
+    stage_x.move_to(start_pos[0], wait=True)
+    stage_y.move_to(start_pos[1], wait=True)
+
+    # Drops needle
+    stage_z.move_to(start_pos[2], wait=True)
+
+    # Sets deposition speed
+    syringe.set_speed(0.01)
+    stage_x.set_speed(0.1)
+
+    # Deposition movement
+    syringe.syringe_dispense(0.01)
+    stage_x.move_rel(line_length)
+
+    # Retract needle
+    stage_z.move_rel(-10)
+    
+    
 # -----------------------------------------------------------------------------------
 # APPROACH
 # -----------------------------------------------------------------------------------
