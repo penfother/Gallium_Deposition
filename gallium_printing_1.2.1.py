@@ -140,7 +140,7 @@ class Device:
     # -------------------- MOTION -----------------------------
     def check_limit(self, move: float) -> None:
         if move < self.min_pos or move > self.max_pos:
-            return 
+            print("Movement out of bounds.")
         
         return True
 
