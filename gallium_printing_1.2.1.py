@@ -146,13 +146,14 @@ class ZaberDevice:
         return self.active_profile["vel"]
 
     # -------------------- MOTION -----------------------------
-    def check_limit(self, move: float) -> bool:
+    def check_limit(self, move: float, relative=True) -> bool:
         '''Verifies if the movement is within possible axis movement.'''
-        if move < self.min_pos or move > self.max_pos:
-            print("Movement out of bounds.")
+        pos = self.position()
+        target = pos + move if relative else move
+        if target < self.min_pos or target > self.max_pos:
+            print(f"Movement out of bounds: {target} mm")
             return False
-        else:
-            return True
+        return True
 
 
     def move_to(self, position_native: int, wait: bool = True):
@@ -161,13 +162,15 @@ class ZaberDevice:
             raise RuntimeError(f"No active speed profile selected for {self.label}")
         prof = self.active_profile
 
+        self.axis.move_velocity(
+            self.active_profile["vel"],
+            unit=Units.VELOCITY_MILLIMETRES_PER_SECOND
+        )
+
         self.axis.move_absolute(
             position_native,
             unit=Units.LENGTH_MILLIMETRES,
             wait_until_idle =wait,
-            velocity=prof["vel"],
-            velocity_unit=prof["unit"],
-            acceleration=prof["acc"]
         )
     
     def move_abs(self, mm: float, wait=False):
@@ -177,7 +180,7 @@ class ZaberDevice:
     def move_rel(self, mm: float, wait=False):
         '''Moves the device relative to its current position.'''
         prof = self.active_profile
-        if self.check_limit(mm) != True:
+        if not self.check_limit(mm, relative=True):
             return True
 
         self.axis.move_velocity(
@@ -528,6 +531,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
             ]               
             make_line(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"], 
                       start_pos, line_length, direction)
+            return True
 
         # Unknown
         case _:
