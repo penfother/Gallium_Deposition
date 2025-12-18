@@ -156,17 +156,10 @@ class ZaberDevice:
 
 
     def move_to(self, position_native: int, wait: bool = True):
-        '''Moves device to defined NATIVE position'''
+        '''Moves device to defined position in mm away from home'''
         if not self.active_profile:
             raise RuntimeError(f"No active speed profile selected for {self.label}")
         prof = self.active_profile
-
-        self.axis.move_velocity(
-            prof["vel"],
-            unit = prof["unit"],
-            acceleration = prof["acc"],
-            acceleration_unit = prof["unit"]
-        )
 
         self.axis.move_absolute(
             position_native,
@@ -413,7 +406,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
                 return True
             
             if partcmd[1] == "abs":  # Absolute movement
-                axis = partcmd[2]
+                axis = str(partcmd[2])
                 mm = float(partcmd[3])
                 dev = stages[f"stage_{axis}"]
                 dev.move_abs(mm)
@@ -529,9 +522,9 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
             line_length = float(partcmd[1])
             direction = str(partcmd[2]) 
             start_pos = [
-                stages["stage_x"].position(),
-                stages["stage_y"].position(),
-                stages["stage_z"].position()
+                float(stages["stage_x"].position()),
+                float(stages["stage_y"].position()),
+                float(stages["stage_z"].position())
             ]               
             make_line(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"], 
                       start_pos, line_length, direction)

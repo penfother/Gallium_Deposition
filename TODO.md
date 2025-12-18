@@ -4,6 +4,7 @@ List of TODOs:
 * Add checking of user input, in case it is out of bounds, ignore the input and print some message -> Test
 * Test-> draw line
 * Add calculation of current position and position query for bound limits
+* Recheck the movement procedures in the device class
 
 Normal:
 * Add initial position capabilities
