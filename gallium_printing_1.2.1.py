@@ -155,7 +155,6 @@ class ZaberDevice:
             return False
         return True
 
-
     def move_to(self, position_native: int, wait: bool = True):
         '''Moves device to defined position in mm away from home'''
         if not self.active_profile:
@@ -175,19 +174,19 @@ class ZaberDevice:
     
     def move_abs(self, mm: float, wait=False):
         '''Moves the device to a defined position in mm.'''
+        if not self.check_limit(mm, relative=False):
+            return False
         self.move_to(mm, wait)
 
     def move_rel(self, mm: float, wait=False):
         '''Moves the device relative to its current position.'''
         prof = self.active_profile
         if not self.check_limit(mm, relative=True):
-            return True
+            return False
 
         self.axis.move_velocity(
             prof["vel"],
-            unit = prof["unit"],
-            acceleration = prof["acc"],
-            acceleration_unit = prof["unit"]
+            unit=Units.VELOCITY_MILLIMETRES_PER_SECOND
         )
         self.axis.move_relative(
             mm,
@@ -195,6 +194,7 @@ class ZaberDevice:
             wait_until_idle=wait
         )
 
+    # -------------------- POSITIONING -----------------------------
     def position(self) -> float:
         '''Returns device position in mm.'''
         pos = self.axis.get_position(unit = Units.LENGTH_MILLIMETRES)
@@ -212,6 +212,8 @@ class ZaberDevice:
         '''Sets home for the device. Not used currently.'''
         self.axis.set_home()
 
+    def set_start(self):
+        self.start_position = self.position()
     # -------------------- SYRINGE -----------------------------
 
     # TODO: correct velocities and accelerations
@@ -236,16 +238,16 @@ class ZaberDevice:
         # Set velocity first
         self.axis.move_velocity(
             prof["vel"],
-            unit = prof["unit"],
-            acceleration = prof["acc"],
-            acceleration_unit = prof["unit"]
+            unit = Units.VELOCITY_MILLIMETRES_PER_SECOND
         )
+
+        if not self.check_limit(mm, relative=False):
+            return False
 
         # Now movement
         self.axis.move_relative(
             mm,
-            unit=Units.LENGTH_MICROMETRES,
-            wait_until_idle=wait
+            unit=Units.LENGTH_MILLIMETRES,
         )
 
     def syringe_retract(self, mm: float, wait: bool = False):
@@ -261,9 +263,7 @@ class ZaberDevice:
         # Set velocity first
         self.axis.move_velocity(
             prof["vel"],
-            unit = prof["unit"],
-            acceleration = prof["acc"],
-            acceleration_unit = prof["unit"]
+            unit = Units.VELOCITY_MILLIMETRES_PER_SECOND
         )
 
         # Now movement
@@ -309,7 +309,7 @@ def make_dots(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
 
 
 # -----------------------------------------------------------------------------------
-# MAKE LINE <---------- not implemented in parser
+# MAKE LINE
 # -----------------------------------------------------------------------------------
 #def liquid_amount(volume: float) -> None:
     #'Calculates the plunger travel dependant on the volume of liquid metal'
@@ -317,7 +317,7 @@ def make_dots(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
 def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syringe: ZaberDevice,
               start_pos: list, line_length: float, direction: str):
     '''Deposits the fluid in a line from a dedicated position and height. Lifts needle when done.'''   
-    
+
     # Sets movement speeds
     stage_z.set_speed(0.2)
     stage_x.set_speed(1)
@@ -335,11 +335,28 @@ def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
     stage_x.set_speed(0.1)
 
     # Deposition movement
-    syringe.syringe_dispense(0.01)
+    if not syringe.check_limit(0.1, relative=False):
+        return
+    syringe.syringe_dispense(0.1)
+    
 
-    # TODO: fix so it intakes the user input direction
-    stage_x.move_rel(line_length)
+    # Intakes user input direction
+    match direction:
+        case "x":
+            target = start_pos[0] + line_length
+            if not stage_x.check_limit(target, relative=False):
+                return
+            stage_x.move_to(target, wait=True)
 
+        case "y":
+            target = start_pos[1] + line_length
+            if not stage_y.check_limit(target, relative=False):
+                return
+            stage_y.move_to(target, wait=True)
+
+        case _:
+            print("Invalid direction.")
+            return
 
     # Retract needle
     stage_z.move_rel(-10)
@@ -363,12 +380,12 @@ def approach(stage: ZaberDevice, step_mm: float) -> None:
 
         match key:
             case "w":
-                if stage.check_limit(step_mm) == False:
-                    return True
+                if not stage.check_limit(step_mm):
+                    return
                 stage.move_rel(step_mm, wait=True)
             case "s":
-                if stage.check_limit(step_mm) == False:
-                    return True
+                if not stage.check_limit(-step_mm):
+                    return
                 stage.move_rel(-step_mm, wait=True)
             case "x":
                 break
@@ -441,15 +458,16 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
         case "sethome":
             axis = partcmd[1]
             dev = stages[f"stage_{axis}"]
-            dev.home()
-            print(f"Homed {axis}")
+            dev.set_home_here()
+            print(f"Set home for {axis}")
             return True
         
         # Set Start
         case "setstart":
             for stage in stages.values():
-                stage.start_position = stage.position()
-                return True
+                stage.set_start()
+            print("Start position set for all stages.")
+            return True
 
         # Speed set in mm/s
         case "speed":
@@ -525,9 +543,9 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
             line_length = float(partcmd[1])
             direction = str(partcmd[2]) 
             start_pos = [
-                float(stages["stage_x"].position()),
-                float(stages["stage_y"].position()),
-                float(stages["stage_z"].position())
+                float(stages["stage_x"].start_position),
+                float(stages["stage_y"].start_position),
+                float(stages["stage_z"].start_position)
             ]               
             make_line(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"], 
                       start_pos, line_length, direction)
@@ -563,7 +581,7 @@ def main() -> None:
                 raise RuntimeError(f"Missing devices: {missing}")
 
             # EMERGENCY STOP & HELP
-            setup_escape_listener(stages)
+            setup_escape_listener(conn)
             print_help()
 
             # Home at start
