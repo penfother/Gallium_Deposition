@@ -27,7 +27,7 @@ LABEL_TO_ADDRESS = {
 }
 
 # ----------------------------------------------------------------------------------
-# EMERGENCY STOP
+# EMERGENCY STOP -> doesnt work correctly
 # ----------------------------------------------------------------------------------
 def emergency_stop(connection: Connection) -> None:
     '''Stops all axes immediately.'''
@@ -81,13 +81,17 @@ def print_help() -> None:
 # ----------------------------------------------------------------------------------
 # DEVICE CLASS
 # ----------------------------------------------------------------------------------
-class Device:
+class ZaberDevice:
     ''' Wrapper for the Zaber device'''
     def __init__(self, label: str, axis, connection, device):
         # General information
         self.label = label
         self.axis = axis
         self.connection = connection
+        self.device = device
+
+        # Start position for deposition
+        self.start_position = 0.0
 
         # Movement limits
         self.min_pos = device.settings.get("limit.min", unit=Units.LENGTH_MILLIMETRES)
@@ -109,6 +113,7 @@ class Device:
 
     # Create profile
     def set_profile(self, name: str, velocity: float, acceleration: float = 0, unit=Units.LENGTH_MILLIMETRES):
+        '''Creates speed profile.'''
         self.speed_profiles[name] = {
             "vel":velocity, 
             "acc":acceleration, 
@@ -116,6 +121,7 @@ class Device:
     
     # Set profile to use
     def use_profile(self, name: str):
+        '''Sets the speed profile to be used.'''
         if name not in self.speed_profiles:
             raise ValueError(f"Speed profile '{name}' not found for {self.label}")
         self.active_profile = self.speed_profiles[name]
@@ -123,6 +129,7 @@ class Device:
     # --------------------- SPEED CONTROL ------------------------------
     # Define speed
     def set_speed(self, mm_per_s: float):
+        '''Set speed profile in mm/s.'''
         if not self.active_profile:
             print("Warning: No active speed profile, set to default profile.")
             self.default_profile()
@@ -133,6 +140,7 @@ class Device:
 
     # Fetch current speed profile
     def get_speed(self) -> float:
+        '''Fetches the current device speed profile.'''
         if not self.active_profile:
             return 0
         return self.active_profile["vel"]
@@ -170,9 +178,11 @@ class Device:
         )
     
     def move_abs(self, mm: float, wait=False):
+        '''Moves the device to a defined position in mm.'''
         self.move_to(mm, wait)
 
     def move_rel(self, mm: float, wait=False):
+        '''Moves the device relative to its current position.'''
         prof = self.active_profile
         if self.check_limit(mm) != True:
             return True
@@ -189,13 +199,21 @@ class Device:
             wait_until_idle=wait
         )
 
+    def position(self) -> float:
+        '''Returns device position in mm.'''
+        pos = self.axis.get_position(unit = Units.LENGTH_MILLIMETRES)
+        return pos
+
     def home(self):
+        '''Homes device.'''
         self.axis.home()
 
     def stop(self):
+        '''Stops device.'''
         self.axis.stop()
 
     def set_home_here(self):
+        '''Sets home for the device. Not used currently.'''
         self.axis.set_home()
 
     # -------------------- SYRINGE -----------------------------
@@ -268,7 +286,7 @@ class Device:
 # DOTS
 # -----------------------------------------------------------------------------------
 
-def make_dots(stage_x: Device, stage_y: Device, stage_z: Device, syringe: Device,
+def make_dots(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syringe: ZaberDevice,
               dots: int, spacing: float, dispense_amount: float) -> None:
     '''From the start position dispenses dots along the desired axis'''
     # TODO: Fix the start position capability
@@ -295,12 +313,12 @@ def make_dots(stage_x: Device, stage_y: Device, stage_z: Device, syringe: Device
 
 
 # -----------------------------------------------------------------------------------
-# DRAW LINE <---------- not implemented in parser
+# MAKE LINE <---------- not implemented in parser
 # -----------------------------------------------------------------------------------
 #def liquid_amount(volume: float) -> None:
     #'Calculates the plunger travel dependant on the volume of liquid metal'
 
-def make_line(stage_x: Device, stage_y: Device, stage_z: Device, syringe: Device,
+def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syringe: ZaberDevice,
               start_pos: list, line_length: float, direction: str):
     '''Deposits the fluid in a line from a dedicated position and height. Lifts needle when done.'''   
     
@@ -322,7 +340,10 @@ def make_line(stage_x: Device, stage_y: Device, stage_z: Device, syringe: Device
 
     # Deposition movement
     syringe.syringe_dispense(0.01)
+
+    # TODO: fix so it intakes the user input direction
     stage_x.move_rel(line_length)
+
 
     # Retract needle
     stage_z.move_rel(-10)
@@ -331,7 +352,7 @@ def make_line(stage_x: Device, stage_y: Device, stage_z: Device, syringe: Device
 # -----------------------------------------------------------------------------------
 # APPROACH
 # -----------------------------------------------------------------------------------
-def approach(stage: Device, step_mm: float) -> None:
+def approach(stage: ZaberDevice, step_mm: float) -> None:
     '''Manual fine control for stage'''
     print("Manual approach mode activated. Use W/S to move, X to exit.")
 
@@ -362,7 +383,7 @@ def approach(stage: Device, step_mm: float) -> None:
 # -----------------------------------------------------------------------------------
 # COMMAND HANDLING
 # -----------------------------------------------------------------------------------
-def handle_command(line: str, stages: Dict[str, Device]) -> bool:
+def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
     '''Parse and execute a single-line command. Returns False to exit loop.'''
 
     # Clean input
@@ -428,6 +449,12 @@ def handle_command(line: str, stages: Dict[str, Device]) -> bool:
             print(f"Homed {axis}")
             return True
         
+        # Set Start
+        case "setstart":
+            for stage in stages.values():
+                stage.start_position = stage.position()
+                return True
+
         # Speed set in mm/s
         case "speed":
             axis = partcmd[1]
@@ -496,6 +523,18 @@ def handle_command(line: str, stages: Dict[str, Device]) -> bool:
             # TODO: add sethome connection to determine the starting position for the device
             # TODO: add error handling for list index out of range
             return True
+        
+        # Make line -> makeline 
+        case "makeline":
+            line_length = float(partcmd[1])
+            direction = str(partcmd[2]) 
+            start_pos = [
+                stages["stage_x"].position(),
+                stages["stage_y"].position(),
+                stages["stage_z"].position()
+            ]               
+            make_line(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"], 
+                      start_pos, line_length, direction)
 
         # Unknown
         case _:
@@ -511,7 +550,7 @@ def main() -> None:
         # keep the connection open for the session
         with conn:
             devices = conn.detect_devices()
-            stages: Dict[str, Device] = {}
+            stages: Dict[str, ZaberDevice] = {}
 
     #  Label devices according to their serial numbers
             for device in devices:
@@ -519,8 +558,7 @@ def main() -> None:
                 if serial in SERIAL_TO_LABEL:
                     label = SERIAL_TO_LABEL[serial]
                     LABEL_TO_ADDRESS[label] = device.device_address
-                    stages[label] = Device(label, device.get_axis(1), conn, device)
-                    print(f"stage: {label}, max: {Device.max_pos}, min: {Device.min_pos}")
+                    stages[label] = ZaberDevice(label, device.get_axis(1), conn, device)
 
             # Check for any missing devices
             missing = [label for label in SERIAL_TO_LABEL.values() if label not in stages]
