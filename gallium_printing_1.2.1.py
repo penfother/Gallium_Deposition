@@ -27,7 +27,7 @@ LABEL_TO_ADDRESS = {
 }
 
 # ----------------------------------------------------------------------------------
-# EMERGENCY STOP -> doesnt work correctly
+# EMERGENCY STOP
 # ----------------------------------------------------------------------------------
 def emergency_stop(connection: Connection) -> None:
     '''Stops all axes immediately.'''
