@@ -75,6 +75,8 @@ def print_help() -> None:
     print("  syringe dispense 1     -> dispense syringe")
     print("  syringe retract 1      -> retract syringe")
     print("  syringe speed 2        -> set syringe speed")
+    print("  setstart               -> saves the current position for x y and z axis for later deposition")
+    print("  makeline x 5           -> deposits a line in x direction with 5mm length")
     print("  approach x 0.05        -> approach stage x in increment 0.05")
     print("  exit                   -> quit")
 
@@ -279,7 +281,7 @@ class ZaberDevice:
 
 
 # -----------------------------------------------------------------------------------
-# DOTS
+# DOTS -----> not working correctly
 # -----------------------------------------------------------------------------------
 
 def make_dots(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syringe: ZaberDevice,
@@ -331,11 +333,11 @@ def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
     stage_z.move_to(start_pos[2], wait=True)
 
     # Sets deposition speed
-    syringe.set_speed(0.01)
+    syringe.set_speed(0.1)
     stage_x.set_speed(0.1)
 
     # Deposition movement
-    if not syringe.check_limit(0.1, relative=False):
+    if not syringe.check_limit(0.4, relative=False):
         return
     syringe.syringe_dispense(0.1)
     
