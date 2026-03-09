@@ -1,9 +1,10 @@
 import sys
 import keyboard
+import datetime
 from typing import Dict
 from zaber_motion.ascii import Connection, DeviceSettings
 
-from zaber_motion import Units, Tools
+from zaber_motion import Units, Tools, Library, LogOutputMode
 import msvcrt
 
 # ----------------------------------------------------------------------------------
@@ -42,6 +43,25 @@ def setup_escape_listener(connection: Connection) -> None:
     keyboard.add_hotkey("esc", on_escape)
     print("Emergency stop enabled - press ESC anytime.")
 
+# ----------------------------------------------------------------------------------
+# LOG SETUP
+# ----------------------------------------------------------------------------------
+def setup_logging() -> str:
+    '''Directs Zaber library logs to a timestamped file for the session.'''
+    session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path= f"session{session_timestamp}.log"
+    Library.set_log_output(LogOutputMode.FILE, log_path)
+    return log_path
+
+def log_move(file_path: str, device_label: str, action: str, value: float = None):
+    '''Logs a movement command with a timestamp.'''
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    if value is not None:
+        line = f"{timestamp} | {action:<12} | {device_label:<10} | {value:>8.4f} mm\n"
+    else:
+        line = f"{timestamp} | {action:<12} | {device_label:<10}\n"
+    with open(file_path, "a") as f:
+        f.write(line)
 # ----------------------------------------------------------------------------------
 #  CONNECTION
 # ----------------------------------------------------------------------------------
@@ -398,7 +418,7 @@ def approach(stage: ZaberDevice, step_mm: float) -> None:
 # -----------------------------------------------------------------------------------
 # COMMAND HANDLING
 # -----------------------------------------------------------------------------------
-def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
+def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> bool:
     '''Parse and execute a single-line command. Returns False to exit loop.'''
 
     # Clean input
@@ -431,6 +451,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
                 axis = str(partcmd[2])
                 mm = float(partcmd[3])
                 dev = stages[f"stage_{axis}"]
+                log_move(logger, f"stage_{axis}", "absolute", mm)
                 dev.move_abs(mm)
                 print(f"Moved {axis} to abs {mm} mm")
                 return True
@@ -439,6 +460,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
                 axis = partcmd[1]
                 mm = float(partcmd[2])
                 dev = stages[f"stage_{axis}"]
+                log_move(logger, f"stage_{axis}", "relative", mm)
                 dev.move_rel(mm)
                 print(f"Moved {axis} relative {mm} mm")
                 return True
@@ -446,12 +468,14 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
         # Home
         case "home":
             if len(partcmd) == 2 and partcmd[1] == "all": # All devices
+                log_move(logger, "all", "home")
                 for dev in stages.values():
                     dev.home()
                 print("All devices homed.")
                 return True
             
             axis = partcmd[1] # One device
+            log_move(logger, f"stage_{axis}", "home")
             dev = stages[f"stage_{axis}"]
             dev.home()
             return True
@@ -500,6 +524,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
                 # Dispense (positive)
                 case "dispense":
                     mm = float(partcmd[2])
+                    log_move(logger, "stage_s", "dispense", mm)
                     dev.syringe_dispense(mm)
                     print(f"Syringe dispensed {mm} units.")
                     return True
@@ -507,6 +532,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
                 # Retract (negative)
                 case "retract":
                     mm = float(partcmd[2])
+                    log_move(logger, "stage_s", "retract", mm)
                     dev.syringe_retract(mm)
                     print(f"Syringe retracted {mm} units.")
                     return True
@@ -544,6 +570,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
         case "makeline":
             line_length = float(partcmd[1])
             direction = str(partcmd[2]) 
+            log_move(logger, f"stage_{direction}", "makeline", line_length)
             start_pos = [
                 float(stages["stage_x"].start_position),
                 float(stages["stage_y"].start_position),
@@ -562,6 +589,11 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice]) -> bool:
 # MAIN
 # -----------------------------------------------------------------------------------
 def main() -> None:
+    
+    # starts logging session
+    log_path = setup_logging()
+    print(f"Logging to {log_path}")
+
     try:
         conn = connect_auto()  # Find connection
         # keep the connection open for the session
@@ -592,7 +624,7 @@ def main() -> None:
         # Command loop
             while True:
                 user_input = input("Command > ")
-                if not handle_command(user_input, stages):
+                if not handle_command(user_input, stages, log_path):
                     break
 
     # Escape pressed

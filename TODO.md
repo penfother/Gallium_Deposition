@@ -1,6 +1,6 @@
 List of TODOs:
 
----Logging---
+---Helper functions---
 * Create ability to log in the movements of the machine
 * Add checking of user input, in case it is out of bounds, ignore the input and print some message
 * Add calculation of current position and position query for bound limits
