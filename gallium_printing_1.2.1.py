@@ -308,9 +308,9 @@ def volume_to_plunger_travel(volume_ul: float) -> float:
 
     if NOZZLE_INNER_DIAMETER_MM <= 0:
         raise ValueError("NOZZLE_INNER_DIAMETER_MM must be set before dispensing.")
-    radius_mm= NOZZLE_INNER_DIAMETER_MM_INNER_DIAMETER_MM / 2
+    radius_mm= NOZZLE_INNER_DIAMETER_MM / 2
     area_mm2 = 3.14159265 * (radius_mm ** 2)
-    travel_mm = volume_uL / area_mm2
+    travel_mm = volume_ul / area_mm2
     return travel_mm
 
 # ----------------------------------------------------------------------------------
@@ -465,7 +465,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> 
                 axis = str(partcmd[2])
                 mm = float(partcmd[3])
                 dev = stages[f"stage_{axis}"]
-                log_move(logger, f"stage_{axis}", "absolute", mm)
+                log_move(log_path, f"stage_{axis}", "absolute", mm)
                 dev.move_abs(mm)
                 print(f"Moved {axis} to abs {mm} mm")
                 return True
@@ -474,7 +474,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> 
                 axis = partcmd[1]
                 mm = float(partcmd[2])
                 dev = stages[f"stage_{axis}"]
-                log_move(logger, f"stage_{axis}", "relative", mm)
+                log_move(log_path, f"stage_{axis}", "relative", mm)
                 dev.move_rel(mm)
                 print(f"Moved {axis} relative {mm} mm")
                 return True
@@ -482,14 +482,14 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> 
         # Home
         case "home":
             if len(partcmd) == 2 and partcmd[1] == "all": # All devices
-                log_move(logger, "all", "home")
+                log_move(log_path, "all", "home")
                 for dev in stages.values():
                     dev.home()
                 print("All devices homed.")
                 return True
             
             axis = partcmd[1] # One device
-            log_move(logger, f"stage_{axis}", "home")
+            log_move(log_path, f"stage_{axis}", "home")
             dev = stages[f"stage_{axis}"]
             dev.home()
             return True
@@ -538,7 +538,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> 
                 # Dispense (positive)
                 case "dispense":
                     mm = float(partcmd[2])
-                    log_move(logger, "stage_s", "dispense", mm)
+                    log_move(log_path, "stage_s", "dispense", mm)
                     dev.syringe_dispense(mm)
                     print(f"Syringe dispensed {mm} units.")
                     return True
@@ -546,7 +546,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> 
                 # Retract (negative)
                 case "retract":
                     mm = float(partcmd[2])
-                    log_move(logger, "stage_s", "retract", mm)
+                    log_move(log_path, "stage_s", "retract", mm)
                     dev.syringe_retract(mm)
                     print(f"Syringe retracted {mm} units.")
                     return True
@@ -584,7 +584,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> 
         case "makeline":
             line_length = float(partcmd[1])
             direction = str(partcmd[2]) 
-            log_move(logger, f"stage_{direction}", "makeline", line_length)
+            log_move(log_path, f"stage_{direction}", "makeline", line_length)
             start_pos = [
                 float(stages["stage_x"].start_position),
                 float(stages["stage_y"].start_position),
