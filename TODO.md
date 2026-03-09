@@ -17,7 +17,7 @@ List of TODOs:
 * Add volume calculation for syringe
 * Add speed profiles for movement and deposition
 * Add a pressure control for the syringe pump
-
+* Add pressure dependancy on the inner nozzle diameter
 
 
 extra:

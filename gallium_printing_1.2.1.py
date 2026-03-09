@@ -27,6 +27,10 @@ LABEL_TO_ADDRESS = {
     "stage_s": 4,
 }
 
+# Syringe variables -> SET BEFORE USE
+SYRINGE_INNER_DIAMETER_MM = 12.0 # mm
+NOZZLE_INNER_DIAMETER_MM = 0.06 # mm
+
 # ----------------------------------------------------------------------------------
 # EMERGENCY STOP -> doesnt work correctly
 # ----------------------------------------------------------------------------------
@@ -62,6 +66,7 @@ def log_move(file_path: str, device_label: str, action: str, value: float = None
         line = f"{timestamp} | {action:<12} | {device_label:<10}\n"
     with open(file_path, "a") as f:
         f.write(line)
+
 # ----------------------------------------------------------------------------------
 #  CONNECTION
 # ----------------------------------------------------------------------------------
@@ -296,6 +301,19 @@ class ZaberDevice:
         )
 
 # ----------------------------------------------------------------------------------
+# SYRINGE CALCULATTION
+# ----------------------------------------------------------------------------------
+def volume_to_plunger_travel(volume_ul: float) -> float:
+    '''Converts dispensed volume to plunger travel in mm.'''
+
+    if NOZZLE_INNER_DIAMETER_MM <= 0:
+        raise ValueError("NOZZLE_INNER_DIAMETER_MM must be set before dispensing.")
+    radius_mm= NOZZLE_INNER_DIAMETER_MM_INNER_DIAMETER_MM / 2
+    area_mm2 = 3.14159265 * (radius_mm ** 2)
+    travel_mm = volume_uL / area_mm2
+    return travel_mm
+
+# ----------------------------------------------------------------------------------
 # SPEED PROFILES
 # ----------------------------------------------------------------------------------
 
@@ -333,9 +351,6 @@ def make_dots(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
 # -----------------------------------------------------------------------------------
 # MAKE LINE
 # -----------------------------------------------------------------------------------
-#def liquid_amount(volume: float) -> None:
-    #'Calculates the plunger travel dependant on the volume of liquid metal'
-
 def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syringe: ZaberDevice,
               start_pos: list, line_length: float, direction: str):
     '''Deposits the fluid in a line from a dedicated position and height. Lifts needle when done.'''   
@@ -382,8 +397,7 @@ def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
 
     # Retract needle
     stage_z.move_rel(-10)
-    
-    
+      
 # -----------------------------------------------------------------------------------
 # APPROACH
 # -----------------------------------------------------------------------------------
