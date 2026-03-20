@@ -1,11 +1,13 @@
 import sys
 import keyboard
 import datetime
-from typing import Dict
-from zaber_motion.ascii import Connection, DeviceSettings
-
-from zaber_motion import Units, Tools, Library, LogOutputMode
 import msvcrt
+import numpy as np
+
+from typing import Dict
+
+from zaber_motion.ascii import Connection
+from zaber_motion import Units, Tools, Library, LogOutputMode
 
 # ----------------------------------------------------------------------------------
 # CONSTANTS
@@ -52,14 +54,14 @@ def setup_escape_listener(connection: Connection) -> None:
 # ----------------------------------------------------------------------------------
 def setup_logging() -> str:
     '''Directs Zaber library logs to a timestamped file for the session.'''
-    session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    session_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path= f"session{session_timestamp}.log"
     Library.set_log_output(LogOutputMode.FILE, log_path)
     return log_path
 
 def log_move(file_path: str, device_label: str, action: str, value: float = None):
     '''Logs a movement command with a timestamp.'''
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     if value is not None:
         line = f"{timestamp} | {action:<12} | {device_label:<10} | {value:>8.4f} mm\n"
     else:
@@ -90,20 +92,21 @@ def connect_auto() -> Connection:
 def print_help() -> None:
     '''Prints available commands.'''
     print("Commands:")
-    print("  move x 10              -> relative move")
-    print("  move abs x 50          -> absolute move")
-    print("  home x                 -> home axis")
-    print("  home all               -> home all stages")
-    print("  sethome x              -> mark current pos as home")
-    print("  speed x 2.5            -> set speed mm/s")
-    print("  getspeed x             -> read speed")
-    print("  syringe dispense 1     -> dispense syringe")
-    print("  syringe retract 1      -> retract syringe")
-    print("  syringe speed 2        -> set syringe speed")
-    print("  setstart               -> saves the current position for x y and z axis for later deposition")
-    print("  makeline x 5           -> deposits a line in x direction with 5mm length")
-    print("  approach x 0.05        -> approach stage x in increment 0.05")
-    print("  exit                   -> quit")
+    print("  move x 10                      -> relative move")
+    print("  move abs x 50                  -> absolute move")
+    print("  home x                         -> home axis")
+    print("  home all                       -> home all stages")
+    print("  sethome x                      -> mark current pos as home")
+    print("  speed x 2.5                    -> set speed mm/s")
+    print("  getspeed x                     -> read speed")
+    print("  syringe dispense 1             -> dispense syringe")
+    print("  syringe retract 1              -> retract syringe")
+    print("  syringe speed 2                -> set syringe speed")
+    print("  syringe pressure 30            -> set syringe pressure (0-70)")
+    print("  setstart                       -> saves the current position for x y and z axis for later deposition")
+    print("  makeline 10 x 2 0.001 0.01     -> line 10mm in x, v_stage=2mm/s, Q=0.001mm³/s, h0=0.01mm")
+    print("  approach x 0.05                -> approach stage x in increment 0.05")
+    print("  exit                           -> quit")
 
 # ----------------------------------------------------------------------------------
 # DEVICE CLASS
@@ -134,17 +137,14 @@ class ZaberDevice:
         '''Create a default speed profile if none exists and activate it.'''
         if "default" not in self.speed_profiles:
             # default velocity 1 mm/s, acceleration 0
-            self.speed_profiles["default"] = {"vel": 1, "acc": 0, "unit": Units.VELOCITY_MILLIMETRES_PER_SECOND}
-        if not self.active_profile:
-            self.active_profile = self.speed_profiles["default"]
+            self.speed_profiles["default"] = {"vel": 1.0, "acc": 0.0, "unit": Units.VELOCITY_MILLIMETRES_PER_SECOND}
+        self.active_profile = self.speed_profiles["default"]
+        self._push_profile()
 
     # Create profile
-    def set_profile(self, name: str, velocity: float, acceleration: float = 0, unit=Units.LENGTH_MILLIMETRES):
-        '''Creates speed profile.'''
-        self.speed_profiles[name] = {
-            "vel":velocity, 
-            "acc":acceleration, 
-            "unit": unit}
+    def set_profile(self, name: str, velocity: float, acceleration: float = 0.0):
+        '''Creates a named speed profile.'''
+        self.speed_profiles[name] = {"vel": velocity, "acc": acceleration}
     
     # Set profile to use
     def use_profile(self, name: str):
@@ -152,18 +152,26 @@ class ZaberDevice:
         if name not in self.speed_profiles:
             raise ValueError(f"Speed profile '{name}' not found for {self.label}")
         self.active_profile = self.speed_profiles[name]
+        self._push_profile()
 
-    # --------------------- SPEED CONTROL ------------------------------
+    def _push_profile(self):
+        '''Pushes active profile to hardware.'''
+        self.axis.settings.set(
+            "maxspeed",
+            self.active_profile["vel"],
+            unit = Units.VELOCITY_MILLIMETRES_PER_SECOND
+        )
+        self.axis.settings.set(
+            "accel",
+            self.active_profile["acc"],
+            unit=Units.ACCELERATION_MILLIMETRES_PER_SECOND_SQUARED
+        )
+
     # Define speed
     def set_speed(self, mm_per_s: float):
-        '''Set speed profile in mm/s.'''
-        if not self.active_profile:
-            print("Warning: No active speed profile, set to default profile.")
-            self.default_profile()
+        '''Updates active profile speed and pushes to hardware.'''
         self.active_profile["vel"] = mm_per_s
-        self.active_profile["acc"] = 0
-        self.active_profile["unit"] = Units.VELOCITY_MILLIMETRES_PER_SECOND
-        return mm_per_s
+        self._push_profile()
 
     # Fetch current speed profile
     def get_speed(self) -> float:
@@ -183,16 +191,7 @@ class ZaberDevice:
         return True
 
     def move_to(self, position_native: int, wait: bool = True):
-        '''Moves device to defined position in mm away from home'''
-        if not self.active_profile:
-            raise RuntimeError(f"No active speed profile selected for {self.label}")
-        prof = self.active_profile
-
-        self.axis.move_velocity(
-            self.active_profile["vel"],
-            unit=Units.VELOCITY_MILLIMETRES_PER_SECOND
-        )
-
+        '''Moves device to defined position in mm away from home.'''
         self.axis.move_absolute(
             position_native,
             unit=Units.LENGTH_MILLIMETRES,
@@ -207,14 +206,9 @@ class ZaberDevice:
 
     def move_rel(self, mm: float, wait=False):
         '''Moves the device relative to its current position.'''
-        prof = self.active_profile
         if not self.check_limit(mm, relative=True):
             return False
 
-        self.axis.move_velocity(
-            prof["vel"],
-            unit=Units.VELOCITY_MILLIMETRES_PER_SECOND
-        )
         self.axis.move_relative(
             mm,
             unit=Units.LENGTH_MILLIMETRES,
@@ -241,37 +235,28 @@ class ZaberDevice:
 
     def set_start(self):
         self.start_position = self.position()
-    # -------------------- SYRINGE -----------------------------
 
-    # TODO: correct velocities and accelerations
-    # TODO: add volume calculation after getting the syringe
-    # TODO: 
-
+    # -------------------- SYRINGE ----------------------------- 
     def is_syringe(self) -> bool:
         '''Returns true if this device is the syringe pump.'''
         return self.label == "stage_s"
+    
+    def set_pressure(self, run: float, hold: float = 15) -> None:
+        '''Sets syringe motor current as pressure proxy.
+        run: active current during motion (0-70)
+        hold: current when stationary (0-70), default 15'''
+        if not self.is_syringe():
+            raise RuntimeError(f"{self.label} is not a syringe device.")
+        self.device.settings.set("driver.current.run", run)
+        self.device.settings.set("driver.current.hold", hold)
+        print(f"Pressure set -> run: {run}, hold: {hold}")
 
     def syringe_dispense(self, mm: float, wait: bool = False):
         '''Pump (positive direction). Uses syringe profile.'''
-
         if not self.is_syringe():
             raise RuntimeError(f"{self.label} is not a syringe device.")
-        
-        if not self.active_profile:
-            raise RuntimeError("No active speed profile selected for the syringe.")
-        
-        prof = self.active_profile
-
-        # Set velocity first
-        self.axis.move_velocity(
-            prof["vel"],
-            unit = Units.VELOCITY_MILLIMETRES_PER_SECOND
-        )
-
         if not self.check_limit(mm, relative=False):
             return False
-
-        # Now movement
         self.axis.move_relative(
             mm,
             unit=Units.LENGTH_MILLIMETRES,
@@ -281,19 +266,8 @@ class ZaberDevice:
         '''Retract (negative direction). Uses syringe profile.'''
         if not self.is_syringe():
             raise RuntimeError(f"{self.label} is not a syringe device.")
-        
-        if not self.active_profile:
-            raise RuntimeError("No active speed profile selected for the syringe.")
-        
-        prof = self.active_profile
-
-        # Set velocity first
-        self.axis.move_velocity(
-            prof["vel"],
-            unit = Units.VELOCITY_MILLIMETRES_PER_SECOND
-        )
-
-        # Now movement
+        if not self.check_limit(-abs(mm), relative=True):
+            return False
         self.axis.move_relative(
                 -abs(mm),
                 unit=Units.LENGTH_MILLIMETRES,
@@ -301,25 +275,20 @@ class ZaberDevice:
         )
 
 # ----------------------------------------------------------------------------------
-# SYRINGE CALCULATTION
+# DEPOSITION CALCULATION
 # ----------------------------------------------------------------------------------
 def volume_to_plunger_travel(volume_ul: float) -> float:
     '''Converts dispensed volume to plunger travel in mm.'''
 
-    if NOZZLE_INNER_DIAMETER_MM <= 0:
-        raise ValueError("NOZZLE_INNER_DIAMETER_MM must be set before dispensing.")
-    radius_mm= NOZZLE_INNER_DIAMETER_MM / 2
+    if SYRINGE_INNER_DIAMETER_MM <= 0:
+        raise ValueError("SYRINGE_INNER_DIAMETER_MM must be set before dispensing.")
+    radius_mm= SYRINGE_INNER_DIAMETER_MM / 2
     area_mm2 = 3.14159265 * (radius_mm ** 2)
     travel_mm = volume_ul / area_mm2
     return travel_mm
 
-# ----------------------------------------------------------------------------------
-# SPEED PROFILES
-# ----------------------------------------------------------------------------------
-
-
 # -----------------------------------------------------------------------------------
-# DOTS -----> not working correctly
+# DOTS -> Not fully implemented
 # -----------------------------------------------------------------------------------
 
 def make_dots(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syringe: ZaberDevice,
@@ -347,57 +316,132 @@ def make_dots(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
 
     stage_x.home()
 
-
 # -----------------------------------------------------------------------------------
 # MAKE LINE
 # -----------------------------------------------------------------------------------
 def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syringe: ZaberDevice,
-              start_pos: list, line_length: float, direction: str):
-    '''Deposits the fluid in a line from a dedicated position and height. Lifts needle when done.'''   
+              start_pos: list, line_length: float, direction: str,
+              v_stage: float, Q: float, h0: float) -> None:
+    '''Deposits a line from start_pos in given direction.
+    v_stage: XY stage speed (mm/s)
+    Q: flow rate (mm³/s)
+    h0: standoff distance (mm)'''
 
-    # Sets movement speeds
+    # TODO: Implement the touch sensor for the height adjustment
+    # TODO: 
+
+    # v_plunger = Q / (π × (D_barrel/2)²) -> continuity equation
+    v_plunger = Q / (3.14159265 * ((SYRINGE_INNER_DIAMETER_MM / 2) ** 2))
+
+    # Set speeds
+    stage_x.set_speed(v_stage)
+    stage_y.set_speed(v_stage)
     stage_z.set_speed(0.2)
-    stage_x.set_speed(1)
-    stage_y.set_speed(1)
+    syringe.set_speed(v_plunger)
 
-    # Moves to position
-    stage_x.move_to(start_pos[0], wait=True)
-    stage_y.move_to(start_pos[1], wait=True)
+    # Move XY to start position
+    stage_x.move_abs(start_pos[0], wait=True)
+    stage_y.move_abs(start_pos[1], wait=True)
 
-    # Drops needle
-    stage_z.move_to(start_pos[2], wait=True)
+    # Drop Z to h0
+    stage_z.move_abs(h0, wait=True)
 
-    # Sets deposition speed
-    syringe.set_speed(0.1)
-    stage_x.set_speed(0.1)
+    # Start syringe and line simultaneously
+    syringe.syringe_dispense(line_length, wait=False)
 
-    # Deposition movement
-    if not syringe.check_limit(0.4, relative=False):
-        return
-    syringe.syringe_dispense(0.1)
-    
-
-    # Intakes user input direction
     match direction:
         case "x":
-            target = start_pos[0] + line_length
-            if not stage_x.check_limit(target, relative=False):
+            if not stage_x.check_limit(line_length, relative=True):
+                syringe.stop()
+                stage_z.move_rel(-1, wait=True)
                 return
-            stage_x.move_to(target, wait=True)
-
+            stage_x.move_rel(line_length, wait=True)
         case "y":
-            target = start_pos[1] + line_length
-            if not stage_y.check_limit(target, relative=False):
+            if not stage_y.check_limit(line_length, relative=True):
+                syringe.stop()
+                stage_z.move_rel(-1, wait=True)
                 return
-            stage_y.move_to(target, wait=True)
-
+            stage_y.move_rel(line_length, wait=True)
         case _:
             print("Invalid direction.")
+            syringe.stop()
+            stage_z.move_rel(-1, wait=True)
             return
 
-    # Retract needle
-    stage_z.move_rel(-10)
-      
+    # Stop syringe and raise Z
+    syringe.stop()
+    stage_z.move_rel(-5, wait=True)
+
+# -----------------------------------------------------------------------------------
+# SWEEP -> not fully implemented
+# -----------------------------------------------------------------------------------
+def sweep(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syringe: ZaberDevice,
+          start_pos: list, line_length: float, direction: str,
+          split: float, fixed: dict, swept: dict) -> None:
+    '''Runs a 2-parameter sweep of deposition lines.
+    fixed: dict of fixed parameters e.g. {"v_stage": 2}
+    swept: dict of swept parameters e.g. {"Q": (0.001, 0.01, 0.001), "h0": (0.005, 0.015, 0.001)}'''
+
+    # gap between lines within a group
+    gap_width = 3 * NOZZLE_INNER_DIAMETER_MM
+
+    # unpack fixed parameter
+    v_stage = fixed.get("v_stage", 1.0)
+    Q       = fixed.get("Q", 0.001)
+    h0      = fixed.get("h0", 0.01)
+
+    # unpack swept parameters
+    param_names = list(swept.keys())
+    if len(param_names) != 2:
+        print("Sweep requires exactly 2 swept parameters.")
+        return
+
+    # outer and inner parameter ranges
+    outer_name = param_names[0]
+    inner_name = param_names[1]
+
+    outer_start, outer_end, outer_step = swept[outer_name]
+    inner_start, inner_end, inner_step = swept[inner_name]
+
+    outer_range = np.arange(outer_start, outer_end + outer_step, outer_step)
+    inner_range = np.arange(inner_start, inner_end + inner_step, inner_step)
+
+    current_pos = start_pos.copy()
+    n = 0
+
+    for outer_val in outer_range:
+        # set outer parameter
+        if outer_name == "v_stage": v_stage = outer_val
+        elif outer_name == "Q":     Q = outer_val
+        elif outer_name == "h0":    h0 = outer_val
+
+        for inner_val in inner_range:
+            # set inner parameter
+            if inner_name == "v_stage": v_stage = inner_val
+            elif inner_name == "Q":     Q = inner_val
+            elif inner_name == "h0":    h0 = inner_val
+
+            # alternate direction for serpentine
+            actual_length = line_length if n % 2 == 0 else -line_length
+
+            make_line(stage_x, stage_y, stage_z, syringe,
+                      current_pos, actual_length, direction,
+                      v_stage, Q, h0)
+
+            # reposition by gap_width perpendicular to direction
+            if direction in ["x", "X"]:
+                current_pos[1] += gap_width
+            elif direction in ["y", "Y"]:
+                current_pos[0] += gap_width
+
+            n += 1
+
+        # split between outer groups
+        if direction in ["x", "X"]:
+            current_pos[1] += split
+        elif direction in ["y", "Y"]:
+            current_pos[0] += split
+        
 # -----------------------------------------------------------------------------------
 # APPROACH
 # -----------------------------------------------------------------------------------
@@ -518,14 +562,14 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> 
             print(f"Set speed of {axis} to {speed} mm/s")
             return True
 
-         # Speed get
+        # Speed get
         case "getspeed":
             axis = partcmd[1]
             dev = stages[f"stage_{axis}"]
             print(dev.get_speed())
             return True
         
-        # ---------------- SYRINGE ----------------
+        # Syringe
         case "syringe":
             if len(partcmd) < 3:
                 print("Usage: syringe <dispense/retract/speed> <value>")
@@ -557,6 +601,13 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> 
                     dev.set_speed(speed)
                     print(f"Syringe speed set to {speed} mm/s.")
                     return True
+                
+                # Syring e presure
+                case "pressure":
+                    run = float(partcmd[2])
+                    dev.set_pressure(run)
+                    print(f"Syringe pressure set to {run}")
+                    return True
 
                 # Unknown syringe action
                 case _:
@@ -582,18 +633,53 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str) -> 
         
         # Make line -> makeline 
         case "makeline":
+            if len(partcmd) != 6:
+                print("Usage: makeline <length> <direction> <v_stage> <Q> <h0>")
+                return True
             line_length = float(partcmd[1])
-            direction = str(partcmd[2]) 
-            log_move(log_path, f"stage_{direction}", "makeline", line_length)
+            direction = str(partcmd[2])
+            v_stage = float(partcmd[3])
+            Q = float(partcmd[4])
+            h0 = float(partcmd[5])
             start_pos = [
                 float(stages["stage_x"].start_position),
                 float(stages["stage_y"].start_position),
                 float(stages["stage_z"].start_position)
-            ]               
-            make_line(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"], 
-                      start_pos, line_length, direction)
+            ]
+            make_line(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"],
+                      start_pos, line_length, direction, v_stage, Q, h0)
             return True
 
+        # Sweep
+        case "sweep":
+            line_length = float(partcmd[1])
+            direction = str(partcmd[2])
+            split = float(partcmd[3])
+            
+            # Parse fixed and swept parameters
+            fixed = {}
+            swept = {}
+            for param in partcmd[4:]:
+                if "=(" in param:
+                    # swept parameter e.g. Q=(0.001,0.01,0.001)
+                    name, values = param.split("=(")
+                    start, end, step = map(float, values.strip(")").split(","))
+                    swept[name] = (start, end, step)
+                elif "=" in param:
+                    # fixed parameter e.g. v_stage=2
+                    name, value = param.split("=")
+                    fixed[name] = float(value)
+            
+            start_pos = [
+                float(stages["stage_x"].start_position),
+                float(stages["stage_y"].start_position),
+                float(stages["stage_z"].start_position)
+            ]
+            
+            sweep(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"],
+                start_pos, line_length, direction, split, fixed, swept)
+            return True
+        
         # Unknown
         case _:
             print(f"Unknown command: {line}")
