@@ -1,6 +1,6 @@
-from zaberdevice import ZaberDevice
+from gallium_printing.core.zaber_wrapper import ZaberDevice
 import numpy as np
-from constants import SYRINGE
+from gallium_printing.config.constants import SYRINGE
 
 # -----------------------------------------------------------------------------------
 # DOTS -> Not fully implemented

@@ -1,0 +1,4 @@
+zaber-motion
+pyserial
+keyboard
+numpy

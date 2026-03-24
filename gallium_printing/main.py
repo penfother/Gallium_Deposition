@@ -1,19 +1,19 @@
 import sys
 import keyboard
-import datetime
-import msvcrt
 import serial
+import serial.tools.list_ports
 import threading
 
 from typing import Dict
 
 from zaber_motion.ascii import Connection
-from zaber_motion import Tools, Library, LogOutputMode
+from zaber_motion import Tools
 
-from zaberdevice import ZaberDevice
-from deposition import make_dots, make_line, sweep
-from contact import _contact_event, connect_arduino, _listen_arduino, approach_substrate
-from constants import DEVICES, SYRINGE, APPROACH
+from gallium_printing.core.zaber_wrapper import ZaberDevice
+from gallium_printing.core.deposition import make_dots, make_line, sweep
+from logging import log_move, setup_logging
+from gallium_printing.core.contact import _contact_event, connect_arduino, _listen_arduino, run_approach, approach
+from gallium_printing.config.constants import DEVICES, ARDUINO
 
 # ----------------------------------------------------------------------------------
 # EMERGENCY STOP
@@ -32,26 +32,6 @@ def setup_escape_listener(connection: Connection) -> None:
     print("Emergency stop enabled - press ESC anytime.")
 
 # ----------------------------------------------------------------------------------
-# LOG SETUP
-# ----------------------------------------------------------------------------------
-def setup_logging() -> str:
-    '''Directs Zaber library logs to a timestamped file for the session.'''
-    session_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path= f"session{session_timestamp}.log"
-    Library.set_log_output(LogOutputMode.FILE, log_path)
-    return log_path
-
-def log_move(file_path: str, device_label: str, action: str, value: float = None):
-    '''Logs a movement command with a timestamp.'''
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    if value is not None:
-        line = f"{timestamp} | {action:<12} | {device_label:<10} | {value:>8.4f} mm\n"
-    else:
-        line = f"{timestamp} | {action:<12} | {device_label:<10}\n"
-    with open(file_path, "a") as f:
-        f.write(line)
-
-# ----------------------------------------------------------------------------------
 #  CONNECTION
 # ----------------------------------------------------------------------------------
 def connect_auto() -> Connection:
@@ -67,6 +47,23 @@ def connect_auto() -> Connection:
         except Exception:
             pass
     raise RuntimeError("No Zaber devices detected on any port.")
+
+def connect_arduino() -> serial.Serial:
+    '''Scans available ports and returns the one where Arduino is connected.'''
+    ports = serial.tools.list_ports.comports()
+    for port in ports:
+        try:
+            ser = serial.Serial(port.device, ARDUINO["baud"], timeout= 2)
+            ser.setDTR(False)
+            ser.setDTR(True)
+            line  = ser.readline().decode("utf-8").strip()
+            if line == "READY":
+                print(f"Arduino found on {port.device}")
+                return ser
+            ser.close()
+        except Exception:
+            pass
+    raise RuntimeError("No Arduino detected on any port.")
 
 # -----------------------------------------------------------------------------------
 #  HELP
@@ -90,52 +87,6 @@ def print_help() -> None:
     print("  approach x 0.05                -> approach stage x in increment 0.05")
     print("  touchdown                      -> measure substrate contact height (3x average)")
     print("  exit                           -> quit")
-
-# ----------------------------------------------------------------------------------
-# DEPOSITION CALCULATION
-# ----------------------------------------------------------------------------------
-'''
-def volume_to_plunger_travel(volume_ul: float) -> float:
-    Converts dispensed volume to plunger travel in mm.
-
-    if SYRINGE["nozzle_inner_diameter_mm"] <= 0:
-        raise ValueError("nozzle_inner must be set before dispensing.")
-    radius_mm= SYRINGE_INNER_DIAMETER_MM / 2
-    area_mm2 = 3.14159265 * (radius_mm ** 2)
-    travel_mm = volume_ul / area_mm2
-    return travel_mm
-'''
-
-# -----------------------------------------------------------------------------------
-# APPROACH
-# -----------------------------------------------------------------------------------
-def approach(stage: ZaberDevice, step_mm: float) -> None:
-    '''Manual fine control for stage'''
-    print("Manual approach mode activated. Use W/S to move, X to exit.")
-
-    # Loop
-    while True:
-        event = keyboard.read_event()
-
-        if event.event_type != "down":
-            continue
-
-        key = event.name
-
-        match key:
-            case "w":
-                if not stage.check_limit(step_mm):
-                    return
-                stage.move_rel(step_mm, wait=True)
-            case "s":
-                if not stage.check_limit(-step_mm):
-                    return
-                stage.move_rel(-step_mm, wait=True)
-            case "x":
-                break
-    
-    while msvcrt.kbhit():
-        msvcrt.getch()
 
 # -----------------------------------------------------------------------------------
 # COMMAND HANDLING
@@ -287,7 +238,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
         
         # Touchdown
         case "touchdown":
-            z_contact = approach_substrate(stages["stage_z"], arduino)
+            z_contact = run_approach(stages["stage_z"], arduino, log_path)
             print(f"Substrate contact reference: {z_contact:.4f} mm")
             return True
         

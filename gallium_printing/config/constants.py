@@ -36,3 +36,8 @@ APPROACH = {
     "current_approach":  17,    # low enough to stall on contact
     "n_measurements":    3,
 }
+
+# Arduino
+ARDUINO = {
+    "baud":              115200,
+}
