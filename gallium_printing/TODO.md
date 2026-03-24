@@ -8,8 +8,6 @@ List of TODOs:
 
 ---Initialising---
 * Add initial position capabilities
-* Create an input parameter for checking if the needle is touching the substrate
-* Program the ability to be enabled by touch
 * Map out the substrate as you touch them to ensure the same gap height everywhere before deposition starts (only on first deposition and outside the bounds of the deposition)
 
 ---Deposition---

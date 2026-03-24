@@ -14,6 +14,7 @@ from gallium_printing.core.deposition import make_dots, make_line, sweep
 from logging import log_move, setup_logging
 from gallium_printing.core.contact import _contact_event, connect_arduino, _listen_arduino, run_approach, approach
 from gallium_printing.config.constants import DEVICES, ARDUINO
+from gallium_printing.core.substrate_mapping import SubstrateMap
 
 # ----------------------------------------------------------------------------------
 # EMERGENCY STOP
@@ -86,12 +87,15 @@ def print_help() -> None:
     print("  makeline 10 x 2 0.001 0.01     -> line 10mm in x, v_stage=2mm/s, Q=0.001mm³/s, h0=0.01mm")
     print("  approach x 0.05                -> approach stage x in increment 0.05")
     print("  touchdown                      -> measure substrate contact height (3x average)")
+    print("  mappoint                       -> store current XYZ as a substrate corner")
+    print("  mapshow                        -> show current substrate map")
+    print("  mapclear                       -> reset substrate map")
     print("  exit                           -> quit")
 
 # -----------------------------------------------------------------------------------
 # COMMAND HANDLING
 # -----------------------------------------------------------------------------------
-def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, arduino: serial.Serial) -> bool:
+def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, arduino: serial.Serial, substrate_map: SubstrateMap) -> bool:
     '''Parse and execute a single-line command. Returns False to exit loop.'''
 
     # Clean input

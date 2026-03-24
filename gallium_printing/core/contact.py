@@ -1,9 +1,10 @@
 import threading
 import serial
-from gallium_printing.core.zaber_wrapper import ZaberDevice
 import keyboard
 import msvcrt
+
 from logging import log_move
+from gallium_printing.core.zaber_wrapper import ZaberDevice
 
 # ----------------------------------------------------------------------------------
 # ARDUINO

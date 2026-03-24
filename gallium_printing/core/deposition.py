@@ -1,5 +1,6 @@
-from gallium_printing.core.zaber_wrapper import ZaberDevice
 import numpy as np
+
+from gallium_printing.core.zaber_wrapper import ZaberDevice
 from gallium_printing.config.constants import SYRINGE
 
 # -----------------------------------------------------------------------------------
