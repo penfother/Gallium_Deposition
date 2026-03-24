@@ -9,11 +9,11 @@ from typing import Dict
 from zaber_motion.ascii import Connection
 from zaber_motion import Tools
 
+from gallium_printing.config.constants import DEVICES, ARDUINO
 from gallium_printing.core.zaber_wrapper import ZaberDevice
 from gallium_printing.core.deposition import make_dots, make_line, sweep
-from logging import log_move, setup_logging
-from gallium_printing.core.contact import _contact_event, connect_arduino, _listen_arduino, run_approach, approach
-from gallium_printing.config.constants import DEVICES, ARDUINO
+from gallium_printing.core.logging import log_move, setup_logging
+from gallium_printing.core.contact import _contact_event, _listen_arduino, run_approach, approach
 from gallium_printing.core.substrate_mapping import SubstrateMap
 
 # ----------------------------------------------------------------------------------
@@ -277,32 +277,65 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
 
         # Sweep
         case "sweep":
-            line_length = float(partcmd[1])
-            direction = str(partcmd[2])
-            split = float(partcmd[3])
-            
-            # Parse fixed and swept parameters
-            fixed = {}
-            swept = {}
-            for param in partcmd[4:]:
-                if "=(" in param:
-                    # swept parameter e.g. Q=(0.001,0.01,0.001)
-                    name, values = param.split("=(")
-                    start, end, step = map(float, values.strip(")").split(","))
-                    swept[name] = (start, end, step)
-                elif "=" in param:
-                    # fixed parameter e.g. v_stage=2
-                    name, value = param.split("=")
-                    fixed[name] = float(value)
-            
-            start_pos = [
-                float(stages["stage_x"].start_position),
-                float(stages["stage_y"].start_position),
-                float(stages["stage_z"].start_position)
-            ]
-            
-            sweep(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"],
-                start_pos, line_length, direction, split, fixed, swept)
+            try:
+                line_length = float(input("  Line length (mm): "))
+                direction = input("  Direction (x/y): ").strip().lower()
+                if direction not in ["x", "y"]:
+                    print("Invalid direction. Use x or y.")
+                    return True
+
+                fixed = {}
+                swept = {}
+                for param in ["v_stage", "Q", "h0"]:
+                    raw = input(f"  {param} — fixed <value> or sweep <start> <end> <step>: ").strip().split()
+                    if raw[0] == "fixed":
+                        fixed[param] = float(raw[1])
+                    elif raw[0] == "sweep":
+                        swept[param] = (float(raw[1]), float(raw[2]), float(raw[3]))
+                    else:
+                        print(f"Invalid input for {param}. Use 'fixed <value>' or 'sweep <start> <end> <step>'.")
+                        return True
+
+                if len(swept) != 2:
+                    print(f"Need exactly 2 swept parameters, got {len(swept)}.")
+                    return True
+
+                split = float(input("  Gap between groups (mm): "))
+
+                start_pos = [
+                    float(stages["stage_x"].start_position),
+                    float(stages["stage_y"].start_position),
+                    float(stages["stage_z"].start_position)
+                ]
+
+                sweep(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"],
+                    start_pos, line_length, direction, split, fixed, swept)
+
+            except (ValueError, IndexError) as e:
+                print(f"Invalid input: {e}")
+
+            return True
+        
+        # Map point
+        case "mappoint":
+            x = stages["stage_x"].position()
+            y = stages["stage_y"].position()
+            z_contact = run_approach(stages["stage_z"], arduino, log_path)
+            count = substrate_map.add_corner(x, y, z_contact)
+            print(f"Corner {count}/4 stored: x={x:.4f}  y={y:.4f}  z={z_contact:.4f}")
+            if substrate_map.is_complete:
+                print(substrate_map)
+            return True
+
+        # Map show
+        case "mapshow":
+            print(substrate_map)
+            return True
+
+        # Map clear
+        case "mapclear":
+            substrate_map.clear()
+            print("Substrate map cleared.")
             return True
         
         # Unknown
@@ -318,6 +351,9 @@ def main() -> None:
     # starts logging session
     log_path = setup_logging()
     print(f"Logging to {log_path}")
+
+    # Creates empty substrate map for deposition
+    substrate_map = SubstrateMap()
 
     try:
         conn = connect_auto()  # Find connection
@@ -354,7 +390,7 @@ def main() -> None:
         # Command loop
             while True:
                 user_input = input("Command > ")
-                if not handle_command(user_input, stages, log_path, arduino):
+                if not handle_command(user_input, stages, log_path, arduino, substrate_map):
                     break
 
     # Escape pressed

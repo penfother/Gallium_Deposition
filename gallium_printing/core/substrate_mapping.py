@@ -8,7 +8,7 @@ class SubstrateMap:
     Corners are collected one at a time via mappoint, then
     plane + safe area are auto-computed once all 4 are in.'''
     
-    def __init(self):
+    def __init__(self):
         self.corners = []
         self.plane = None
         self.safe_area = None
@@ -66,7 +66,7 @@ def fit_plane(points: list[tuple[float, float, float]]) -> tuple[float, float, f
 
     a, b, c = np.linalg.lstsq(A, z, rcond=None)[0]
 
-    return round(a, 3), round(b, 6), round(c, 6)
+    return round(a, 3), round(b, 3), round(c, 3)
 
 # -----------------------------------------------------------------------------------
 # Z VELOCITY FOR LINE

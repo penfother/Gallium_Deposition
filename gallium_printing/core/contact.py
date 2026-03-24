@@ -3,17 +3,17 @@ import serial
 import keyboard
 import msvcrt
 
-from logging import log_move
+from gallium_printing.core.logging import log_move
 from gallium_printing.core.zaber_wrapper import ZaberDevice
 
 # ----------------------------------------------------------------------------------
 # ARDUINO
 # ----------------------------------------------------------------------------------
-_contact_event = threading.event()
+_contact_event = threading.Event()
 
 def _listen_arduino(ser, axis):
     while True:
-        line = ser.readilne().decode("utf-8").strip()
+        line = ser.readline().decode("utf-8").strip()
         if line:
             print(f"[Arduino] {line}")
         if line == "CONTACT":
@@ -68,10 +68,7 @@ def run_approach(stage_z: ZaberDevice, arduino: serial.Serial, log_path: str) ->
     Returns:
         average contact position in mm
     '''
-
-    listener = threading.Thread(target=_listen_arduino, args=(arduino, stage_z), daemon=True)
-    listener.start()
-
+    
     # Manual approach
     print("\nManual approach — use W/S to move Z, X when done.")
     approach(stage_z, step_mm=1)
