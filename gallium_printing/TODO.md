@@ -1,44 +1,71 @@
-List of TODOs:
+TODO - Gallium Printing
+========================
 
----Helper functions---
-* Add checking of user input, in case it is out of bounds, ignore the input and print some message
-* Add calculation of current position and position query for bound limits
-* Recheck the movement procedures in the device class
-* Add the deposition parameter functions from the paper to help with the deposition
+--- Commands ---
+[ ] pos command - print current XYZ + syringe positions
+[ ] note command - log a text observation to session log mid-run
 
----Initialising---
-* Add initial position capabilities
-* Map out the substrate as you touch them to ensure the same gap height everywhere before deposition starts (only on first deposition and outside the bounds of the deposition)
+--- Input validation ---
+[ ] handle_command crashes on bad axis name - wrap in try/except or validate
+[ ] handle_command crashes on wrong argument count for most commands
+[ ] sweep validates parameters, rest of commands do not
 
----Deposition---
-* Add speed profiles for movement and deposition
-* Add a pressure control for the syringe pump
-* Add pressure dependancy on the inner nozzle diameter
+--- Sweep ---
+[ ] Pause/resume during sweep (p to pause, r to resume, q to abort)
+[ ] Confirmation before sweep starts - print full plan and ask y/n
+[ ] Boley parameter validation (v* and h0/ID bounds check before motion)
+[ ] Estimated total time and syringe consumption printed before start
+[ ] Per-line CSV log (line_number, timestamp, all parameters, positions)
 
+--- Deposition ---
+[ ] Plunger travel calculation per sweep (will syringe run out mid-sweep?)
+[ ] Load cell force measurement to determine actual extrusion pressure
+[ ] Speed profiles used properly - named profiles for deposition, retract, approach
+[x] Substrate mapping with plane fit and Z compensation
+[x] Safe area bounds checking
+[x] Z tracking during line deposition
 
-extra:
-* set limits of deposition movement only to the size of the table by using calculation of current position of x and y
+--- Logging ---
+[ ] CSV output per sweep - one row per line, all parameters + positions
+[ ] Substrate material tag per session
+[ ] Save/reload substrate map between sessions
 
-we go with v* = 4Q/pi(ID)^2v
-where Q is flow rate (lets call it um/s) = variable
-ID is inner diameter = 0.06 mm
-v is the stage speed = variable
+--- Contact ---
+[x] Arduino contact detection with hardware interrupt
+[x] Precision touchdown (3x averaged)
+[x] mappoint uses touchdown for Z measurement
 
-h_0/ID has to be between 0.03 and 0.21
-v* has to be between 0.05 and 1
+--- Hardware ---
+[ ] Load cell integration (5kg, HX711) - waiting for parts
+[ ] Force-pressure calibration for syringe extrusion
+[ ] New 3D printed parts (X/Y footing, Arduino holder, load cell pusher)
 
-the maximum gap height is therefore 0.21*0.06 = 0.0126
+--- Code cleanup ---
+[ ] Refactor handle_command into separate cmd_ functions
+[ ] is_complete needs parentheses or @property
+[ ] Remove duplicate connect_arduino (contact.py import vs main.py definition)
 
-lets hit for raneg 5 -10 microns to be sure -> 10 is gold
+========================
+Boley framework reference:
 
-with that we have a 10 micron height set 
+v* = 4Q / (π · ID² · v)
+  where Q = flow rate (mm³/s), ID = nozzle inner diameter (mm), v = stage speed (mm/s)
 
-to get the line height of 20 microns
+h₀/ID must be between 0.03 and 0.21
+v* must be between 0.05 and 1
 
-H = 2.1h_0 - 0.03ID
+For 34G nozzle: ID = 0.06 mm
+  max gap height = 0.21 × 0.06 = 0.0126 mm = 12.6 µm
+  target range: 5-10 µm gap height, 10 µm is ideal
 
-h_0 = (20 + 0.03*0.02)/2.1
+Line height prediction:
+  H = 2.1·h₀ - 0.03·ID
 
-h_0 ~ 10 um
+For target H = 20 µm:
+  h₀ = (20 + 0.03 × 0.06) / 2.1
+  h₀ ≈ 9.5 µm ≈ 10 µm
 
-Calculate the force through Hagen-Poiseuille
+Hagen-Poiseuille for pressure estimate:
+  ΔP = 8μLQ / (πr⁴)
+  Still need: viscosity of EGaIn/Gallitherm through 34G nozzle
+  Load cell will give force → F/A_barrel = pressure at plunger
