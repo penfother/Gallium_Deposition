@@ -36,15 +36,20 @@ def setup_escape_listener(connection: Connection) -> None:
 #  CONNECTION
 # ----------------------------------------------------------------------------------
 def connect_auto() -> Connection:
-    '''Scans available ports and returns the port where Zaber devices are conected'''
+    '''Scans available serial ports for Zaber devices, skipping any
+    ports occupied by Arduino to avoid locking them.'''
     ports = Tools.list_serial_ports()
+    arduino_ports = [p.device for p in serial.tools.list_ports.comports() if p.vid == 0x2341]
     for port in ports:
+        if port in arduino_ports:
+            continue
         try:
             conn = Connection.open_serial_port(port)
             devices = conn.detect_devices()
             if devices:
                 print(f"Zaber device found on {port}")
-                return conn  # return the open connection
+                return conn
+            conn.close()
         except Exception:
             pass
     raise RuntimeError("No Zaber devices detected on any port.")
@@ -53,17 +58,10 @@ def connect_arduino() -> serial.Serial:
     '''Scans available ports and returns the one where Arduino is connected.'''
     ports = serial.tools.list_ports.comports()
     for port in ports:
-        try:
-            ser = serial.Serial(port.device, ARDUINO["baud"], timeout= 2)
-            ser.setDTR(False)
-            ser.setDTR(True)
-            line  = ser.readline().decode("utf-8").strip()
-            if line == "READY":
-                print(f"Arduino found on {port.device}")
-                return ser
-            ser.close()
-        except Exception:
-            pass
+        if port.vid == 0x2341:
+            ser = serial.Serial(port.device, ARDUINO["baud"], timeout=5)
+            print(f"Arduino found on {port.device}")
+            return ser
     raise RuntimeError("No Arduino detected on any port.")
 
 # -----------------------------------------------------------------------------------
@@ -243,6 +241,9 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
         # Touchdown
         case "touchdown":
             z_contact = run_approach(stages["stage_z"], arduino, log_path)
+            stages["stage_z"].set_current(30)
+            stages["stage_z"].default_profile()
+            stages["stage_z"].move_rel(-5, wait=True)
             print(f"Substrate contact reference: {z_contact:.4f} mm")
             return True
         
@@ -321,6 +322,9 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
             x = stages["stage_x"].position()
             y = stages["stage_y"].position()
             z_contact = run_approach(stages["stage_z"], arduino, log_path)
+            stages["stage_z"].set_current(30)
+            stages["stage_z"].default_profile()
+            stages["stage_z"].move_rel(-5, wait=True)
             count = substrate_map.add_corner(x, y, z_contact)
             print(f"Corner {count}/4 stored: x={x:.4f}  y={y:.4f}  z={z_contact:.4f}")
             if substrate_map.is_complete:

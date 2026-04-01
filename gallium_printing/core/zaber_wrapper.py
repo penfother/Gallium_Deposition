@@ -24,9 +24,7 @@ class ZaberDevice:
     # -------------------- SPEED PROFILES -----------------------------
     def default_profile(self):
         '''Create a default speed profile if none exists and activate it.'''
-        if "default" not in self.speed_profiles:
-            # default velocity 1 mm/s, acceleration 0
-            self.speed_profiles["default"] = {"vel": 1.0, "acc": 0.0, "unit": Units.VELOCITY_MILLIMETRES_PER_SECOND}
+        self.speed_profiles["default"] = {"vel": 10.0, "acc": 0.0, "unit": Units.VELOCITY_MILLIMETRES_PER_SECOND}
         self.active_profile = self.speed_profiles["default"]
         self._push_profile()
 

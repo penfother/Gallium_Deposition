@@ -1,6 +1,7 @@
 import threading
 import serial
 import keyboard
+import time
 import msvcrt
 
 from gallium_printing.core.logging import log_move
@@ -12,14 +13,16 @@ from gallium_printing.core.zaber_wrapper import ZaberDevice
 _contact_event = threading.Event()
 
 def _listen_arduino(ser, axis):
+    global _contact_enabled
     while True:
         line = ser.readline().decode("utf-8").strip()
+        if line == "READY":
+            continue
         if line:
             print(f"[Arduino] {line}")
-        if line == "CONTACT":
+        if line == "CONTACT" and _contact_enabled:
             axis.stop()
             _contact_event.set()
-
 # -----------------------------------------------------------------------------------
 # APPROACH
 # -----------------------------------------------------------------------------------
@@ -69,6 +72,10 @@ def run_approach(stage_z: ZaberDevice, arduino: serial.Serial, log_path: str) ->
         average contact position in mm
     '''
     
+    # Enables contact detection
+    global _contact_enabled
+    _contact_enabled = True
+
     # Manual approach
     print("\nManual approach — use W/S to move Z, X when done.")
     approach(stage_z, step_mm=1)
@@ -79,25 +86,30 @@ def run_approach(stage_z: ZaberDevice, arduino: serial.Serial, log_path: str) ->
 
     # Probe pass
     _contact_event.clear()
+    arduino.reset_input_buffer()
     arduino.write(b'r')
+    time.sleep(0.2)
     stage_z.set_current(20)
     stage_z.set_speed(0.05)
-    stage_z.move_rel(10.0, wait=False)
+    remaining = stage_z.max_pos - stage_z.position()
+    stage_z.move_rel(remaining, wait=False)
     _contact_event.wait()
     probe_pos = stage_z.position()
     print(f"Probe contact at: {probe_pos:.4f} mm")
     stage_z.set_speed(1.0)
     stage_z.move_rel(-0.5, wait=True)
 
-
     for i in range(3):
         print(f"Measurement {i + 1}/3...")
         _contact_event.clear()
+        arduino.reset_input_buffer()
         arduino.write(b'r')
+        time.sleep(0.2)
 
         stage_z.set_current(15)
         stage_z.set_speed(0.01)
-        stage_z.move_rel(10.0, wait=False)
+        remaining = stage_z.max_pos - stage_z.position()
+        stage_z.move_rel(remaining, wait=False)
 
         _contact_event.wait()
 
@@ -110,9 +122,13 @@ def run_approach(stage_z: ZaberDevice, arduino: serial.Serial, log_path: str) ->
             stage_z.set_current(30)
             stage_z.set_speed(1.0)
             stage_z.move_rel(-0.5, wait=True)
-
+            
+    _contact_enabled = False
+    arduino.reset_input_buffer()
     stage_z.set_current(30)
+    stage_z.default_profile()
     arduino.write(b'r')
+    time.sleep(0.2)
 
     average = sum(measurements) / len(measurements)
     spread = max(measurements) - min(measurements)
