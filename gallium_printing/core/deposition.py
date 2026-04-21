@@ -1,3 +1,7 @@
+import os
+import datetime
+import csv
+
 import numpy as np
 
 from gallium_printing.core.zaber_wrapper import ZaberDevice
@@ -108,6 +112,78 @@ def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
     stage_z.move_rel(-5, wait=True)
 
 # -----------------------------------------------------------------------------------
+# SWEEP HELPERS
+# -----------------------------------------------------------------------------------
+def _validate_sweep_area(line_length: float, direction: str, perp_span: float,
+                         start_pos: list, substrate_map: SubstrateMap = None) -> bool:
+    '''Checks if sweep fits within the mapped safe area. Returns True if valid.'''
+    if not (substrate_map and substrate_map.safe_area):
+        return True
+
+    x_min, y_min, x_max, y_max = substrate_map.safe_area
+
+    if direction == "x":
+        par_limit, perp_limit = x_max - x_min, y_max - y_min
+    else:
+        par_limit, perp_limit = y_max - y_min, x_max - x_min
+
+    if abs(line_length) > par_limit:
+        print(f"Line length {line_length} mm exceeds safe area ({round(par_limit, 3)} mm).")
+        return False
+    if perp_span > perp_limit:
+        print(f"Sweep span {round(perp_span, 3)} mm exceeds safe area ({round(perp_limit, 3)} mm).")
+        return False
+    if not (x_min <= start_pos[0] <= x_max and y_min <= start_pos[1] <= y_max):
+        print("Start position is outside the safe area.")
+        return False
+
+    print(f"Sweep footprint: {abs(line_length)} x {round(perp_span, 3)} mm — fits within safe area.")
+    return True
+
+def _create_sweep_csv() -> str:
+    '''Creates a timestamped CSV file for sweep logging. Returns the file path.'''
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    csv_path = os.path.join(log_dir, f"sweep_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+
+    header = [
+        "line_number", "timestamp",
+        "v_stage", "h0", "Q", "v_star", "h0_over_ID",
+        "direction",
+        "x_start", "y_start", "z_start",
+        "x_end", "y_end", "z_end",
+        "line_length"
+    ]
+
+    with open(csv_path, "w", newline="") as f:
+        csv.writer(f).writerow(header)
+
+    return csv_path
+
+def _log_sweep_line(csv_path: str, line_number: int, params: dict,
+                    direction: str, actual_length: float,
+                    x0: float, y0: float, z0: float,
+                    x1: float, y1: float, z1: float) -> None:
+    '''Appends one row to the sweep CSV.'''
+    nozzle_id = SYRINGE["nozzle_inner_diameter_mm"]
+    v_star = round(4 * params["Q"] / (3.14159265 * nozzle_id**2 * params["v_stage"]), 4)
+    h0_over_id = round(params["h0"] / nozzle_id, 4)
+
+    row = [
+        line_number,
+        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+        params["v_stage"], params["h0"], params["Q"],
+        v_star, h0_over_id,
+        direction,
+        round(x0, 4), round(y0, 4), round(z0, 4),
+        round(x1, 4), round(y1, 4), round(z1, 4),
+        actual_length
+    ]
+
+    with open(csv_path, "a", newline="") as f:
+        csv.writer(f).writerow(row)
+
+# -----------------------------------------------------------------------------------
 # SWEEP
 # -----------------------------------------------------------------------------------
 def sweep(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syringe: ZaberDevice,
@@ -115,58 +191,29 @@ def sweep(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syri
           split: float, fixed: dict, swept: dict,
           substrate_map: SubstrateMap = None) -> None:
     '''Runs a 2-parameter sweep of deposition lines.
-    fixed: dict of fixed parameters e.g. {"v_stage": 2}
-    swept: dict of swept parameters e.g. {"Q": (0.001, 0.01), "h0": (0.005, 0.015)}
     Always 10 steps per parameter = 100 lines total.'''
 
     gap_width = 3 * SYRINGE["nozzle_inner_diameter_mm"]
+    perp_span = 10 * (9 * gap_width) + 9 * split
+
+    if not _validate_sweep_area(line_length, direction, perp_span, start_pos, substrate_map):
+        return
+
+    csv_path = _create_sweep_csv()
+    print(f"Sweep CSV: {csv_path}")
 
     v_stage = fixed.get("v_stage")
     Q       = fixed.get("Q")
     h0      = fixed.get("h0")
 
     outer_name, inner_name = swept.keys()
-
-    outer_start, outer_end = swept[outer_name]
-    inner_start, inner_end = swept[inner_name]
-
-    outer_range = np.linspace(outer_start, outer_end, 10)
-    inner_range = np.linspace(inner_start, inner_end, 10)
-
-    # Check if sweep fits within safe area
-    perp_span = 10 * (9 * gap_width) + 9 * split
-
-    if substrate_map and substrate_map.safe_area:
-        x_min, y_min, x_max, y_max = substrate_map.safe_area
-
-        if direction == "x":
-            if abs(line_length) > (x_max - x_min):
-                print(f"Line length {line_length} mm exceeds safe area width {round(x_max - x_min, 3)} mm.")
-                return
-            if perp_span > (y_max - y_min):
-                print(f"Sweep height {round(perp_span, 3)} mm exceeds safe area height {round(y_max - y_min, 3)} mm.")
-                return
-            if not (x_min <= start_pos[0] <= x_max and y_min <= start_pos[1] <= y_max):
-                print("Start position is outside the safe area.")
-                return
-        elif direction == "y":
-            if abs(line_length) > (y_max - y_min):
-                print(f"Line length {line_length} mm exceeds safe area height {round(y_max - y_min, 3)} mm.")
-                return
-            if perp_span > (x_max - x_min):
-                print(f"Sweep width {round(perp_span, 3)} mm exceeds safe area width {round(x_max - x_min, 3)} mm.")
-                return
-            if not (x_min <= start_pos[0] <= x_max and y_min <= start_pos[1] <= y_max):
-                print("Start position is outside the safe area.")
-                return
-
-        print(f"Sweep footprint: {abs(line_length)} x {round(perp_span, 3)} mm — fits within safe area.")
+    outer_range = np.linspace(*swept[outer_name], 10)
+    inner_range = np.linspace(*swept[inner_name], 10)
 
     current_pos = start_pos.copy()
     params = {"v_stage": v_stage, "Q": Q, "h0": h0}
     n = 0
 
-    # Starts the sweep
     for outer_val in outer_range:
         params[outer_name] = outer_val
 
@@ -175,10 +222,21 @@ def sweep(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syri
 
             actual_length = line_length if n % 2 == 0 else -line_length
 
+            x0 = stage_x.position()
+            y0 = stage_y.position()
+            z0 = stage_z.position()
+
             make_line(stage_x, stage_y, stage_z, syringe,
                       current_pos, actual_length, direction,
                       params["v_stage"], params["Q"], params["h0"],
                       substrate_map)
+
+            x1 = stage_x.position()
+            y1 = stage_y.position()
+            z1 = stage_z.position() + 5
+
+            _log_sweep_line(csv_path, n + 1, params, direction, actual_length,
+                            x0, y0, z0, x1, y1, z1)
 
             if direction == "x":
                 current_pos[1] += gap_width
@@ -190,4 +248,43 @@ def sweep(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, syri
         if direction == "x":
             current_pos[1] += split
         elif direction == "y":
-            current_pos[0] += split 
+            current_pos[0] += split
+
+    print(f"Sweep complete — {n} lines logged to {os.path.basename(csv_path)}")
+
+def _confirm_sweep(line_length: float, direction: str, perp_span: float,
+                   fixed: dict, swept: dict, gap_width: float) -> bool:
+    '''Prints sweep plan and asks for confirmation. Returns True if user confirms.'''
+    nozzle_id = SYRINGE["nozzle_inner_diameter_mm"]
+    outer_name, inner_name = swept.keys()
+    outer_start, outer_end = swept[outer_name]
+    inner_start, inner_end = swept[inner_name]
+
+    print("\n--- Sweep Plan ---")
+    print(f"  Direction:    {direction}")
+    print(f"  Line length:  {line_length} mm")
+    print(f"  Lines:        100 (10 × 10)")
+    print(f"  Gap width:    {round(gap_width, 4)} mm")
+    print(f"  Footprint:    {abs(line_length)} × {round(perp_span, 3)} mm")
+
+    for name, val in fixed.items():
+        print(f"  {name} (fixed): {val}")
+
+    print(f"  {outer_name} (outer): {outer_start} → {outer_end}, 10 steps")
+    print(f"  {inner_name} (inner): {inner_start} → {inner_end}, 10 steps")
+
+    # Boley bounds check on extremes
+    all_v_stage = [fixed["v_stage"]] if "v_stage" in fixed else np.linspace(*swept["v_stage"], 10).tolist()
+    all_Q = [fixed["Q"]] if "Q" in fixed else np.linspace(*swept["Q"], 10).tolist()
+    all_h0 = [fixed["h0"]] if "h0" in fixed else np.linspace(*swept["h0"], 10).tolist()
+
+    v_star_min = 4 * min(all_Q) / (3.14159265 * nozzle_id**2 * max(all_v_stage))
+    v_star_max = 4 * max(all_Q) / (3.14159265 * nozzle_id**2 * min(all_v_stage))
+    h0_id_min = min(all_h0) / nozzle_id
+    h0_id_max = max(all_h0) / nozzle_id
+
+    print(f"  v* range:     {round(v_star_min, 4)} → {round(v_star_max, 4)}  (Boley: 0.05–1)")
+    print(f"  h0/ID range:  {round(h0_id_min, 4)} → {round(h0_id_max, 4)}  (Boley: 0.03–0.21)")
+
+    print()
+    return input("Proceed? (y/n): ").strip().lower() == "y"

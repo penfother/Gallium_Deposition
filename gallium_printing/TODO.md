@@ -3,7 +3,6 @@ TODO - Gallium Printing
 
 --- Commands ---
 [ ] pos command - print current XYZ + syringe positions
-[ ] note command - log a text observation to session log mid-run
 
 --- Input validation ---
 [ ] handle_command crashes on bad axis name - wrap in try/except or validate
@@ -34,6 +33,7 @@ TODO - Gallium Printing
 [x] Arduino contact detection with hardware interrupt
 [x] Precision touchdown (3x averaged)
 [x] mappoint uses touchdown for Z measurement
+[ ] stop motion and return to command
 
 --- Hardware ---
 [ ] Load cell integration (5kg, HX711) - waiting for parts

@@ -41,3 +41,10 @@ APPROACH = {
 ARDUINO = {
     "baud":              115200,
 }
+
+# Startup position (mm) — move here after homing
+STARTUP_POS = {
+    "stage_x": 35.0,
+    "stage_y": 80.0,
+    "stage_z": 20.0,
+}

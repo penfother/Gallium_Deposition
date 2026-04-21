@@ -11,6 +11,8 @@ from gallium_printing.core.zaber_wrapper import ZaberDevice
 # ARDUINO
 # ----------------------------------------------------------------------------------
 _contact_event = threading.Event()
+_contact_enabled = False
+
 
 def _listen_arduino(ser, axis):
     global _contact_enabled
@@ -106,7 +108,7 @@ def run_approach(stage_z: ZaberDevice, arduino: serial.Serial, log_path: str) ->
         arduino.write(b'r')
         time.sleep(0.2)
 
-        stage_z.set_current(15)
+        stage_z.set_current(6.7)
         stage_z.set_speed(0.01)
         remaining = stage_z.max_pos - stage_z.position()
         stage_z.move_rel(remaining, wait=False)

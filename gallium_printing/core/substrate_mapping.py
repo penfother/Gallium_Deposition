@@ -55,6 +55,14 @@ class SubstrateMap:
             lines.append(f"  Safe area size: {round(x1-x0, 3)} x {round(y1-y0, 3)} mm")
         return "\n".join(lines)
 
+    def pop_corner(self) -> int:
+        '''Remove the last corner. Returns remaining count.'''
+        if not self.corners:
+            raise ValueError("No corners to remove.")
+        self.corners.pop()
+        self.plane = None
+        self.safe_area = None
+        return len(self.corners)
 # -----------------------------------------------------------------------------------
 # PLANE FIT
 # -----------------------------------------------------------------------------------

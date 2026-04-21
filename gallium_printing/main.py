@@ -9,7 +9,7 @@ from typing import Dict
 from zaber_motion.ascii import Connection
 from zaber_motion import Tools
 
-from gallium_printing.config.constants import DEVICES, ARDUINO
+from gallium_printing.config.constants import DEVICES, ARDUINO, STARTUP_POS
 from gallium_printing.core.zaber_wrapper import ZaberDevice
 from gallium_printing.core.deposition import make_dots, make_line, sweep
 from gallium_printing.core.logging import log_move, setup_logging
@@ -77,6 +77,7 @@ def print_help() -> None:
     print("  sethome x                      -> mark current pos as home")
     print("  speed x 2.5                    -> set speed mm/s")
     print("  getspeed x                     -> read speed")
+    print("  pos                            -> print current XYZ + syringe positions")
     print("  syringe dispense 1             -> dispense syringe")
     print("  syringe retract 1              -> retract syringe")
     print("  syringe speed 2                -> set syringe speed")
@@ -88,6 +89,8 @@ def print_help() -> None:
     print("  mappoint                       -> store current XYZ as a substrate corner")
     print("  mapshow                        -> show current substrate map")
     print("  mapclear                       -> reset substrate map")
+    print("  mapundo                        -> remove last substrate corner")
+    print("  mapredo                        -> re-measure last corner at current XY")
     print("  exit                           -> quit")
 
 # -----------------------------------------------------------------------------------
@@ -186,6 +189,11 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
             print(dev.get_speed())
             return True
         
+        # Get position
+        case "pos":
+            for label, dev in stages.items():
+                print(f"  {label}: {dev.position():.4f} mm")
+            return True
         # Syringe
         case "syringe":
             if len(partcmd) < 3:
@@ -327,7 +335,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
             stages["stage_z"].move_rel(-5, wait=True)
             count = substrate_map.add_corner(x, y, z_contact)
             print(f"Corner {count}/4 stored: x={x:.4f}  y={y:.4f}  z={z_contact:.4f}")
-            if substrate_map.is_complete:
+            if substrate_map.is_complete():
                 print(substrate_map)
             return True
 
@@ -342,6 +350,34 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
             print("Substrate map cleared.")
             return True
         
+        # Undo last map point
+        case "mapundo":
+            try:
+                remaining = substrate_map.pop_corner()
+                print(f"Last corner removed. {remaining}/4 corners remaining.")
+            except ValueError as e:
+                print(e)
+            return True
+
+        # Redo last map point (remove + re-measure at same XY)
+        case "mapredo":
+            try:
+                substrate_map.pop_corner()
+            except ValueError as e:
+                print(e)
+                return True
+            x = stages["stage_x"].position()
+            y = stages["stage_y"].position()
+            z_contact = run_approach(stages["stage_z"], arduino, log_path)
+            count = substrate_map.add_corner(x, y, z_contact)
+            stages["stage_z"].set_speed(2.0)
+            stages["stage_z"].move_rel(-5, wait=True)
+            print(f"Corner {count}/4 re-measured: x={x:.4f}  y={y:.4f}  z={z_contact:.4f}")
+            stages["stage_z"].set_speed(2.0)
+            stages["stage_z"].move_rel(-5, wait=True)
+            if substrate_map.is_complete():
+                print(substrate_map)
+            return True
         # Unknown
         case _:
             print(f"Unknown command: {line}")
@@ -385,6 +421,17 @@ def main() -> None:
 
             # Home at start
             conn.home_all(wait_until_idle=True)
+
+            # # Home at start
+            conn.home_all(wait_until_idle=True)
+
+            # Move to startup position
+            for label, target in STARTUP_POS.items():
+                stages[label].move_abs(target, wait=False)
+            # Wait for all to arrive
+            for label in STARTUP_POS:
+                stages[label].axis.wait_until_idle()
+            print(f"Startup position reached: X={STARTUP_POS['stage_x']}  Y={STARTUP_POS['stage_y']}  Z={STARTUP_POS['stage_z']}")
     
             # Arduino connection
             arduino = connect_arduino()
