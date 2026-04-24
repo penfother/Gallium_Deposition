@@ -91,6 +91,8 @@ def print_help() -> None:
     print("  mapclear                       -> reset substrate map")
     print("  mapundo                        -> remove last substrate corner")
     print("  mapredo                        -> re-measure last corner at current XY")
+    print("  stick                          -> lock XY movement within mapped safe area")
+    print("  unstick                        -> release stick mode")
     print("  exit                           -> quit")
 
 # -----------------------------------------------------------------------------------
@@ -168,6 +170,16 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
         
         # Set Start
         case "setstart":
+            if len(substrate_map.corners) != 4:
+                print(f"[setstart] rejected: need 4 mapped corners, have {len(substrate_map.corners)}")
+                return True
+            x_now = stages["stage_x"].position()
+            y_now = stages["stage_y"].position()
+            x_min, y_min, x_max, y_max = substrate_map.safe_area
+            if not (x_min <= x_now <= x_max and y_min <= y_now <= y_max):
+                print(f"[setstart] rejected: position ({x_now:.3f}, {y_now:.3f}) outside "
+                    f"safe area x=[{x_min}, {x_max}] y=[{y_min}, {y_max}]")
+                return True
             for stage in stages.values():
                 stage.set_start()
             print("Start position set for all stages.")
@@ -267,25 +279,57 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
         
         # Make line -> makeline 
         case "makeline":
-            if len(partcmd) != 6:
-                print("Usage: makeline <length> <direction> <v_stage> <Q> <h0>")
+            n_corners = len(substrate_map.corners)
+
+            if n_corners == 2:
+                # Line mode — v_stage, Q, h0 from user; start_pos/direction/length from map.
+                if len(partcmd) != 4:
+                    print("Usage (2-corner line mode): makeline <v_stage> <Q> <h0>")
+                    return True
+                v_stage = float(partcmd[1])
+                Q       = float(partcmd[2])
+                h0      = float(partcmd[3])
+                start_pos, direction, line_length = substrate_map.get_line_params()
+
+            elif n_corners == 4:
+                if len(partcmd) != 8:
+                    print("Usage (4-corner mode): makeline <x_start> <y_start> <length> <direction> <v_stage> <Q> <h0>")
+                    return True
+                x_start     = float(partcmd[1])
+                y_start     = float(partcmd[2])
+                line_length = float(partcmd[3])
+                direction   = str(partcmd[4])
+                v_stage     = float(partcmd[5])
+                Q           = float(partcmd[6])
+                h0          = float(partcmd[7])
+
+                # Validate start and endpoint against safe area
+                x_min, y_min, x_max, y_max = substrate_map.safe_area
+                if not (x_min <= x_start <= x_max and y_min <= y_start <= y_max):
+                    print(f"[makeline] start ({x_start}, {y_start}) outside safe area "
+                        f"x=[{x_min}, {x_max}] y=[{y_min}, {y_max}]")
+                    return True
+                x_end = x_start + line_length if direction == "x" else x_start
+                y_end = y_start + line_length if direction == "y" else y_start
+                if not (x_min <= x_end <= x_max and y_min <= y_end <= y_max):
+                    print(f"[makeline] endpoint ({x_end}, {y_end}) outside safe area")
+                    return True
+
+                start_pos = [x_start, y_start, 0.0]  # z is recomputed from plane inside make_line
+
+            else:
+                print(f"[makeline] rejected: need 2 or 4 mapped corners, have {n_corners}")
                 return True
-            line_length = float(partcmd[1])
-            direction = str(partcmd[2])
-            v_stage = float(partcmd[3])
-            Q = float(partcmd[4])
-            h0 = float(partcmd[5])
-            start_pos = [
-                float(stages["stage_x"].start_position),
-                float(stages["stage_y"].start_position),
-                float(stages["stage_z"].start_position)
-            ]
+
             make_line(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"],
-                      start_pos, line_length, direction, v_stage, Q, h0)
+                    start_pos, line_length, direction, v_stage, Q, h0, substrate_map)
             return True
 
         # Sweep
         case "sweep":
+            if len(substrate_map.corners) != 4:
+                print(f"[sweep] rejected: need 4 mapped corners, have {len(substrate_map.corners)}")
+                return True
             try:
                 line_length = float(input("  Line length (mm): "))
                 direction = input("  Direction (x/y): ").strip().lower()
@@ -311,14 +355,11 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
 
                 split = float(input("  Gap between groups (mm): "))
 
-                start_pos = [
-                    float(stages["stage_x"].start_position),
-                    float(stages["stage_y"].start_position),
-                    float(stages["stage_z"].start_position)
-                ]
+                x_min, y_min, _, _ = substrate_map.safe_area
+                start_pos = [x_min, y_min, 0.0]
 
                 sweep(stages["stage_x"], stages["stage_y"], stages["stage_z"], stages["stage_s"],
-                    start_pos, line_length, direction, split, fixed, swept)
+                    start_pos, line_length, direction, split, fixed, swept, substrate_map)
 
             except (ValueError, IndexError) as e:
                 print(f"Invalid input: {e}")
@@ -378,6 +419,24 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
             if substrate_map.is_complete():
                 print(substrate_map)
             return True
+        
+        # Sticks the nozzle movement only to substrate map
+        case "stick":
+            if len(substrate_map.corners) != 4:
+                print(f"[stick] map not complete (need 4 corners, have {len(substrate_map.corners)})")
+                return True
+            for stage in stages.values():
+                stage.stickied(substrate_map)
+            print("[stick] on")
+            return True
+
+        # Unsticks the nozzle movement from the substrate map
+        case "unstick":
+            for stage in stages.values():
+                stage.unstickied()
+            print("[stick] off")
+            return True
+
         # Unknown
         case _:
             print(f"Unknown command: {line}")

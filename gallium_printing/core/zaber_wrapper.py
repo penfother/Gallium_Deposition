@@ -8,6 +8,8 @@ class ZaberDevice:
         self.axis = axis
         self.connection = connection
         self.device = device
+        self.stuck = False
+        self.substrate_map = False
 
         # Start position for deposition
         self.start_position = 0.0
@@ -86,22 +88,34 @@ class ZaberDevice:
         )
     
     def move_abs(self, mm: float, wait=False) -> bool:
-        '''Moves the device to a defined position in mm.'''
+        if self.stuck and self.label in ("stage_x", "stage_y"):
+            x_min, y_min, x_max, y_max = self.substrate_map.safe_area
+            original = mm
+            if self.label == "stage_x":
+                mm = max(x_min, min(x_max, mm))
+            else:
+                mm = max(y_min, min(y_max, mm))
+            if mm != original:
+                print(f"[{self.label}] clamped to {mm:.4f} (map)")
         if not self.check_limit(mm, relative=False):
             return False
         self.move_to(mm, wait)
         return True
 
     def move_rel(self, mm: float, wait=False) -> bool:
-        '''Moves the device relative to its current position.'''
+        if self.stuck and self.label in ("stage_x", "stage_y"):
+            x_min, y_min, x_max, y_max = self.substrate_map.safe_area
+            target = self.position() + mm
+            if self.label == "stage_x":
+                clamped = max(x_min, min(x_max, target))
+            else:
+                clamped = max(y_min, min(y_max, target))
+            if clamped != target:
+                print(f"[{self.label}] clamped to {clamped:.4f} (map)")
+            mm = clamped - self.position()
         if not self.check_limit(mm, relative=True):
             return False
-
-        self.axis.move_relative(
-            mm,
-            unit=Units.LENGTH_MILLIMETRES,
-            wait_until_idle=wait
-        )
+        self.axis.move_relative(mm, unit=Units.LENGTH_MILLIMETRES, wait_until_idle=wait)
         return True
 
     def set_current(self, run: float, hold: float = 15) -> None:
@@ -119,6 +133,9 @@ class ZaberDevice:
 
     def home(self):
         '''Homes device.'''
+        if self.stuck:
+            print(f"[{self.label}] axis stickied, unstick to home")
+            return
         self.axis.home()
 
     def stop(self):
@@ -132,6 +149,14 @@ class ZaberDevice:
     def set_start(self):
         self.start_position = self.position()
 
+    def stickied(self, smap):
+        self.stuck = True
+        self.substrate_map = smap
+    
+    def unstickied(self):
+        self.stuck = False
+        self.substrate_map = None
+    
     # -------------------- SYRINGE ----------------------------- 
     def is_syringe(self) -> bool:
         '''Returns true if this device is the syringe pump.'''

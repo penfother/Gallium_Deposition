@@ -17,17 +17,58 @@ class SubstrateMap:
         return len(self.corners) == 4 and self.plane is not None
 
     def add_corner(self, x: float, y: float, z: float) -> int:
-        '''Add a probed corner point. Returns the new count.
-        Auto-fits plane and safe area when 4th point is added.'''
         if len(self.corners) >= 4:
             raise ValueError("Already have 4 corners. Use 'mapclear' to reset.")
         self.corners.append((round(x, 4), round(y, 4), round(z, 4)))
 
-        if len(self.corners) == 4:
+        n_corners = len(self.corners)
+
+        if n_corners == 2:
+
+            (x1, y1, z1), (x2, y2, z2) = self.corners
+            if round(x1, 3) == round(x2, 3):
+                # y-direction line
+                b = (x2 - x1) / (y2 - y1)
+                a = 0.0
+                c = z1 - b*x1
+            else:
+                a = (z2 - z1) / (y2 - y1)
+                b = 0.0
+                c = z1 - b * x1
+            self.plane = (round(a, 6), round(b, 6), round(c, 3))
+        elif n_corners == 4:
             self.plane = fit_plane(self.corners)
             self.safe_area = deposition_area(self.corners)
 
         return len(self.corners)
+
+    def get_line_params(self) -> tuple[list, str, float]:
+        '''Returns (start_pos, direction, line_length) for the 2-corner line case.'''
+        if len(self.corners) != 2:
+            raise ValueError(f"get_line_params requires 2 corners, have {len(self.corners)}")
+
+        (x1, y1, z1), (x2, y2, z2) = self.corners
+
+        if round(x1, 3) == round(x2, 3):
+            # y-direction line
+            direction = "y"
+            if y1 <= y2:
+                start_pos = [x1, y1, z1]
+                line_length = y2 - y1
+            else:
+                start_pos = [x2, y2, z2]
+                line_length = y1 - y2
+        else:
+            # x-direction line
+            direction = "x"
+            if x1 <= x2:
+                start_pos = [x1, y1, z1]
+                line_length = x2 - x1
+            else:
+                start_pos = [x2, y2, z2]
+                line_length = x1 - x2
+
+        return start_pos, direction, line_length
 
     def clear(self) -> None:
         '''Reset the map.'''
@@ -38,7 +79,7 @@ class SubstrateMap:
     def z_at(self, x: float, y: float) -> float:
         '''Returns the substrate surface z at an arbitrary (x, y) point.'''
         if self.plane is None:
-            raise ValueError("No plane fitted yet — need 4 corners.")
+            raise ValueError("No plane fitted yet — need 2 or 4 corners.")
         a, b, c = self.plane
         return a * x + b * y + c
 

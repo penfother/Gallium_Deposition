@@ -48,8 +48,27 @@ def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
     Q: flow rate (mm³/s)
     h0: standoff distance (mm)'''
 
+    if substrate_map is None or substrate_map.plane is None:
+        print("[make_line] aborting: substrate map required (need 2 or 4 corners mapped)")
+        return
+
+    if direction == "x":
+        target = start_pos[0] + line_length
+        if target < stage_x.min_pos or target > stage_x.max_pos:
+            print(f"[make_line] aborting: x endpoint {target} outside [{stage_x.min_pos}, {stage_x.max_pos}]")
+            return
+    elif direction == "y":
+        target = start_pos[1] + line_length
+        if target < stage_y.min_pos or target > stage_y.max_pos:
+            print(f"[make_line] aborting: y endpoint {target} outside [{stage_y.min_pos}, {stage_y.max_pos}]")
+            return
+    else:
+        print(f"[make_line] aborting: invalid direction '{direction}'")
+        return
+
     # v_plunger = Q / (π × (D_barrel/2)²) -> continuity equation
-    v_plunger = Q / (3.14159265 * ((SYRINGE["barrel_inner_diameter_mm"] / 2) ** 2))
+    barrel_area = 3.14159265 * ((SYRINGE["barrel_inner_diameter_mm"] / 2) ** 2)
+    v_plunger = Q / barrel_area
 
     # Set speeds
     stage_x.set_speed(v_stage)
@@ -62,54 +81,31 @@ def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
     stage_y.move_abs(start_pos[1], wait=True)
 
     # Calculate Z position
-    if substrate_map and substrate_map.is_complete():
-        x0, y0 = start_pos[0], start_pos[1]
-        if direction == "x":
-            x1, y1 = x0 + line_length, y0
-        else:
-            x1, y1 = x0, y0 + line_length
-
-        a, b, c = substrate_map.plane
-        z_start, z_end, v_z = z_velocity_for_line(a, b, c, x0, y0, x1, y1, h0, v_stage)
-
-        stage_z.move_abs(z_start, wait=True)
+    x0, y0 = start_pos[0], start_pos[1]
+    if direction == "x":
+        x1, y1 = x0 + line_length, y0
     else:
-        z_start = h0
-        v_z = None
-        stage_z.move_abs(h0, wait=True)
+        x1, y1 = x0, y0 + line_length
+    a, b, c = substrate_map.plane
+    z_start, z_end, v_z = z_velocity_for_line(a, b, c, x0, y0, x1, y1, h0, v_stage)
+    stage_z.move_abs(z_start, wait=True)
 
-    syringe.syringe_dispense(line_length, wait=False)
+    # Dispense - finishes at the same time as the stage movement
+    plunger_travel = (Q / barrel_area) * (line_length / v_stage)
+    syringe.syringe_dispense(plunger_travel, wait=False)
 
-    # Start Z tracking if plane is mapped
+    # Start Z tracking
     if v_z and v_z != 0:
         stage_z.set_speed(abs(v_z))
         stage_z.move_abs(z_end, wait=False)
 
-    match direction:
-        case "x":
-            if not stage_x.check_limit(line_length, relative=True):
-                syringe.stop()
-                stage_z.stop()
-                stage_z.move_rel(-1, wait=True)
-                return
-            stage_x.move_rel(line_length, wait=True)
-        case "y":
-            if not stage_y.check_limit(line_length, relative=True):
-                syringe.stop()
-                stage_z.stop()
-                stage_z.move_rel(-1, wait=True)
-                return
-            stage_y.move_rel(line_length, wait=True)
-        case _:
-            print("Invalid direction.")
-            syringe.stop()
-            stage_z.stop()
-            stage_z.move_rel(-1, wait=True)
-            return
+    # Stage movement
+    axis = stage_x if direction == "x" else stage_y
+    axis.move_rel(line_length, wait=True)
 
-    # Stop syringe and raise Z
-    syringe.stop()
-    stage_z.move_rel(-5, wait=True)
+    # Raise Z
+    stage_z.set_speed(2.0)
+    stage_z.move_rel(-2, wait=True)
 
 # -----------------------------------------------------------------------------------
 # SWEEP HELPERS
