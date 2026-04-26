@@ -3,6 +3,7 @@ import keyboard
 import serial
 import serial.tools.list_ports
 import threading
+import datetime
 
 from typing import Dict
 
@@ -12,7 +13,7 @@ from zaber_motion import Tools
 from gallium_printing.config.constants import DEVICES, ARDUINO, STARTUP_POS
 from gallium_printing.core.zaber_wrapper import ZaberDevice
 from gallium_printing.core.deposition import make_dots, make_line, sweep
-from gallium_printing.core.logging import log_move, setup_logging
+from gallium_printing.core.logging import log_move, setup_zaber_log, setup_readable_log, TeeStdout
 from gallium_printing.core.contact import _contact_event, _listen_arduino, run_approach, approach
 from gallium_printing.core.substrate_mapping import SubstrateMap
 
@@ -63,6 +64,18 @@ def connect_arduino() -> serial.Serial:
             print(f"Arduino found on {port.device}")
             return ser
     raise RuntimeError("No Arduino detected on any port.")
+
+# -----------------------------------------------------------------------------------
+#  LOGGING HELPER
+# -----------------------------------------------------------------------------------
+def logged_input(prompt: str = "") -> str:
+    '''Like input() but writes the user's typed response into the readable log.'''
+    response = input(prompt)
+    if hasattr(sys.stdout, 'log'):
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        sys.stdout.log.write(f"[{ts}] >>> {response}\n")
+        sys.stdout.log.flush()
+    return response
 
 # -----------------------------------------------------------------------------------
 #  HELP
@@ -331,8 +344,8 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
                 print(f"[sweep] rejected: need 4 mapped corners, have {len(substrate_map.corners)}")
                 return True
             try:
-                line_length = float(input("  Line length (mm): "))
-                direction = input("  Direction (x/y): ").strip().lower()
+                line_length = float(logged_input("  Line length (mm): "))
+                direction = logged_input("  Direction (x/y): ").strip().lower()
                 if direction not in ["x", "y"]:
                     print("Invalid direction. Use x or y.")
                     return True
@@ -340,7 +353,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
                 fixed = {}
                 swept = {}
                 for param in ["v_stage", "Q", "h0"]:
-                    raw = input(f"  {param} — fixed <value> or sweep <start> <end> <step>: ").strip().split()
+                    raw = logged_input(f"  {param} — fixed <value> or sweep <start> <end> <step>: ").strip().split()
                     if raw[0] == "fixed":
                         fixed[param] = float(raw[1])
                     elif raw[0] == "sweep":
@@ -353,7 +366,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
                     print(f"Need exactly 2 swept parameters, got {len(swept)}.")
                     return True
 
-                split = float(input("  Gap between groups (mm): "))
+                split = float(logged_input("  Gap between groups (mm): "))
 
                 x_min, y_min, _, _ = substrate_map.safe_area
                 start_pos = [x_min, y_min, 0.0]
@@ -448,7 +461,9 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
 def main() -> None:
     
     # starts logging session
-    log_path = setup_logging()
+    zaber_log_path = setup_zaber_log()
+    log_path = setup_readable_log()
+    sys.stdout = TeeStdout(log_path)
     print(f"Logging to {log_path}")
 
     # Creates empty substrate map for deposition
@@ -499,7 +514,7 @@ def main() -> None:
 
         # Command loop
             while True:
-                user_input = input("Command > ")
+                user_input = logged_input("Command > ")
                 if not handle_command(user_input, stages, log_path, arduino, substrate_map):
                     break
 
