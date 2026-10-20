@@ -20,8 +20,8 @@ DEVICES = {
 
 # Syringe
 SYRINGE = {
-    "barrel_inner_diameter_mm": 12.0,
-    "nozzle_inner_diameter_mm": 0.06,
+    "barrel_inner_diameter_mm": 4.3,
+    "nozzle_inner_diameter_mm": 0.160,
 }
 
 # Approach
@@ -46,5 +46,5 @@ ARDUINO = {
 STARTUP_POS = {
     "stage_x": 35.0,
     "stage_y": 80.0,
-    "stage_z": 20.0,
+    "stage_z": 1.0,
 }

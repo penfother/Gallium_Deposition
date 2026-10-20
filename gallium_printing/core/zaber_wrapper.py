@@ -119,11 +119,8 @@ class ZaberDevice:
         return True
 
     def set_current(self, run: float, hold: float = 15) -> None:
-        '''Sets motor current.
-        run: active current during motion (0-70)
-        hold: current when stationary (0-70), default 15'''
-        self.device.settings.set("driver.current.run", run)
-        self.device.settings.set("driver.current.hold", hold)
+        self.axis.settings.set("driver.current.run", run)
+        self.axis.settings.set("driver.current.hold", hold)
 
     # -------------------- POSITIONING -----------------------------
     def position(self) -> float:
@@ -144,7 +141,7 @@ class ZaberDevice:
 
     def set_home_here(self):
         '''Sets home for the device. Not used currently.'''
-        self.axis.set_home()
+        self.axis.generic_command("set pos 0")
 
     def set_start(self):
         self.start_position = self.position()
@@ -165,12 +162,18 @@ class ZaberDevice:
     def set_pressure(self, run: float, hold: float = 15) -> None:
         '''Sets syringe motor current as pressure proxy.
         run: active current during motion (0-70)
-        hold: current when stationary (0-70), default 15'''
+        hold: current when stationary (15-70), default 15. Hard floor at 15.'''
         if not self.is_syringe():
             raise RuntimeError(f"{self.label} is not a syringe device.")
-        self.device.settings.set("driver.current.run", run)
-        self.device.settings.set("driver.current.hold", hold)
+        if not (0 <= run <= 70):
+            raise ValueError(f"run current out of range (0-70): {run}")
+        if not (15 <= hold <= 70):
+            raise ValueError(f"hold current out of range (15-70): {hold}")
+        self.axis.settings.set("driver.current.run", run)
+        self.axis.settings.set("driver.current.hold", hold)
         print(f"Pressure set -> run: {run}, hold: {hold}")
+
+
 
     def syringe_dispense(self, mm: float, wait: bool = False):
         '''Pump (positive direction). Uses syringe profile.'''
@@ -181,6 +184,7 @@ class ZaberDevice:
         self.axis.move_relative(
             mm,
             unit=Units.LENGTH_MILLIMETRES,
+            wait_until_idle=wait,
         )
 
     def syringe_retract(self, mm: float, wait: bool = False):

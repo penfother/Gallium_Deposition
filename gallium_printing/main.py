@@ -96,7 +96,7 @@ def print_help() -> None:
     print("  syringe speed 2                -> set syringe speed")
     print("  syringe pressure 30            -> set syringe pressure (0-70)")
     print("  setstart                       -> saves the current position for x y and z axis for later deposition")
-    print("  makeline 10 x 2 0.001 0.01     -> line 10mm in x, v_stage=2mm/s, Q=0.001mm³/s, h0=0.01mm")
+    print("  makeline 10 x 2 0.001 0.01     -> line 10mm in x, v_stage=2mm/s, Q=0.001mm3/s, h0=0.01mm")
     print("  approach x 0.05                -> approach stage x in increment 0.05")
     print("  touchdown                      -> measure substrate contact height (3x average)")
     print("  mappoint                       -> store current XYZ as a substrate corner")
@@ -219,6 +219,7 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
             for label, dev in stages.items():
                 print(f"  {label}: {dev.position():.4f} mm")
             return True
+        
         # Syringe
         case "syringe":
             if len(partcmd) < 3:
@@ -254,15 +255,31 @@ def handle_command(line: str, stages: Dict[str, ZaberDevice], log_path: str, ard
                 
                 # Syring e presure
                 case "pressure":
+                    if len(partcmd) < 3:
+                        print("Usage: syringe pressure <run> [hold]")
+                        return True
                     run = float(partcmd[2])
-                    dev.set_pressure(run)
-                    print(f"Syringe pressure set to {run}")
+                    hold = float(partcmd[3]) if len(partcmd) > 3 else 15.0
+                    dev.set_pressure(run, hold)
                     return True
 
                 # Unknown syringe action
                 case _:
                     print(f"Unknown syringe command: {action}")
                     return True
+
+        # Wet
+        case "wet":
+            if len(partcmd) < 4:
+                print("Usage: wet <step_mm> <run> <hold>")
+                return True
+            step = float(partcmd[1])
+            run = float(partcmd[2])
+            hold = float(partcmd[3])
+            dev = stages["stage_s"]
+            dev.set_pressure(run, hold)
+            approach(dev, step)
+            return True
 
         # Approach
         case "approach":
@@ -493,14 +510,19 @@ def main() -> None:
             setup_escape_listener(conn)
             print_help()
 
-            # Home at start
-            conn.home_all(wait_until_idle=True)
+            # Set the current for all devices to normal on startup
+            for dev in stages.values():
+                dev.axis.settings.set("driver.current.run", 15)
 
-            # # Home at start
-            conn.home_all(wait_until_idle=True)
+            # Home at start (XYZ only — never the syringe; homing it retracts the plunger and inhales air)
+            for label in ("stage_x", "stage_y", "stage_z"):
+                stages[label].axis.home(wait_until_idle=False)
+            for label in ("stage_x", "stage_y", "stage_z"):
+                stages[label].axis.wait_until_idle()
 
             # Move to startup position
             for label, target in STARTUP_POS.items():
+                stages[label].set_current(15)
                 stages[label].move_abs(target, wait=False)
             # Wait for all to arrive
             for label in STARTUP_POS:

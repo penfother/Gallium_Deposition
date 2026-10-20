@@ -24,24 +24,27 @@ class SubstrateMap:
         n_corners = len(self.corners)
 
         if n_corners == 2:
-
             (x1, y1, z1), (x2, y2, z2) = self.corners
-            if round(x1, 3) == round(x2, 3):
-                # y-direction line
-                b = (x2 - x1) / (y2 - y1)
-                a = 0.0
-                c = z1 - b*x1
-            else:
-                a = (z2 - z1) / (y2 - y1)
+            dx = x2 - x1
+            dy = y2 - y1
+
+            if abs(dx) >= abs(dy):
+                # x-direction line
+                a = (z2 - z1) / dx if dx != 0 else 0.0
                 b = 0.0
-                c = z1 - b * x1
+                c = z1 - a * x1
+            else:
+                # y-direction line
+                a = 0.0
+                b = (z2 - z1) / dy if dy != 0 else 0.0
+                c = z1 - b * y1
+
             self.plane = (round(a, 6), round(b, 6), round(c, 3))
         elif n_corners == 4:
             self.plane = fit_plane(self.corners)
             self.safe_area = deposition_area(self.corners)
-
         return len(self.corners)
-
+    
     def get_line_params(self) -> tuple[list, str, float]:
         '''Returns (start_pos, direction, line_length) for the 2-corner line case.'''
         if len(self.corners) != 2:
@@ -128,8 +131,8 @@ def z_velocity_for_line(
 ) -> tuple[float, float, float]:
     '''Calculates Z start, end and velocity to follow 
     the substrate plane during a line move.'''
-    z_start = round(a * x0 + b * y0 + c + h0, 3)
-    z_end   = round(a * x1 + b * y1 + c + h0, 3)
+    z_start = round(a * x0 + b * y0 + c - h0, 3)
+    z_end   = round(a * x1 + b * y1 + c - h0, 3)
 
     xy_distance = np.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
     travel_time = xy_distance / v_stage

@@ -73,7 +73,7 @@ def make_line(stage_x: ZaberDevice, stage_y: ZaberDevice, stage_z: ZaberDevice, 
     # Set speeds
     stage_x.set_speed(v_stage)
     stage_y.set_speed(v_stage)
-    stage_z.set_speed(0.2)
+    stage_z.set_speed(1.0)
     syringe.set_speed(v_plunger)
 
     # Move XY to start position
